@@ -1,6 +1,6 @@
 # Skill Eval
 
-A TypeScript evaluation framework for benchmarking how effectively AI agents use modular skills. Inspired by [SkillsBench](https://arxiv.org/html/2602.12670v1) and [Demystifying Evals for AI Agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents).
+Evaluation framework for [Agent Skills](https://agentskills.io/home). Inspired by [SkillsBench](https://arxiv.org/html/2602.12670v1) and [Demystifying Evals for AI Agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents).
 
 ## Getting Started
 
@@ -27,7 +27,7 @@ pnpm run test:bootstrap
 - **Tasks** — Self-contained directories in `tasks/` with an instruction, Dockerfile, and graders.
 - **Skills** — Co-located in `tasks/<name>/skills/`, auto-injected into `.agents/skills/` (Gemini) and `.claude/skills/` (Claude) for native discovery. See [Skills Best Practices](http://github.com/mgechev/skills-best-practices) for authoring guidelines.
 - **Graders** — Multiple graders per task: deterministic (shell scripts) and LLM rubrics, with weighted partial credit.
-- **Agents** — Gemini CLI and Claude Code harnesses, running in Docker or locally.
+- **Agents** — Gemini CLI and Claude Code harnesses, running in Docker or locally. You can create a custom agent or use with another agent by extending the `BaseAgent` class.
 
 ## CLI Reference
 

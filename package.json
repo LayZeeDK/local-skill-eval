@@ -9,7 +9,8 @@
     "eval": "ts-node src/cli.ts",
     "validate": "ts-node src/cli.ts -- --validate",
     "analyze": "ts-node src/analytics/analyze.ts",
-    "viewer": "ts-node src/viewer.ts"
+    "preview": "ts-node src/preview.ts",
+    "viewer": "ts-node src/preview.ts browser"
   },
   "keywords": [],
   "author": "",

@@ -75,21 +75,51 @@ export class LLMGrader implements Grader {
 
         const rubric = await fs.readFile(rubricPath, 'utf-8');
 
-        // Build a transcript summary for the LLM
-        const transcript = sessionLog
-            .filter(e => e.type === 'command' || e.type === 'agent_result')
-            .map(e => {
-                if (e.type === 'command') return `$ ${e.command}\n${e.stdout || ''}${e.stderr || ''}`;
-                return `Agent output: ${e.output || ''}`;
-            })
-            .join('\n\n');
+        // Build a comprehensive transcript for the LLM
+        const sections: string[] = [];
 
-        const prompt = `You are an evaluation judge. Score the following agent transcript on a scale from 0.0 to 1.0 based on the rubric below.
+        // Include the original instruction
+        const instructionEntry = sessionLog.find(e => e.type === 'agent_start');
+        if (instructionEntry?.instruction) {
+            sections.push(`## Task Instruction\n${instructionEntry.instruction}`);
+        }
+
+        // Include all commands and their output
+        const commandEntries = sessionLog.filter(e => e.type === 'command');
+        if (commandEntries.length > 0) {
+            const cmds = commandEntries.map(e =>
+                `$ ${e.command}\n${e.stdout || ''}${e.stderr ? '\nSTDERR: ' + e.stderr : ''}\n[exit code: ${e.exitCode ?? 'unknown'}]`
+            ).join('\n\n');
+            sections.push(`## Commands Executed\n${cmds}`);
+        }
+
+        // Include agent output
+        const agentEntry = sessionLog.find(e => e.type === 'agent_result');
+        if (agentEntry?.output) {
+            sections.push(`## Agent Output\n${agentEntry.output}`);
+        }
+
+        // Include results from any prior graders (e.g., deterministic tests)
+        const priorGraders = sessionLog
+            .filter(e => e.type === 'grader' && e.grader_result)
+            .map(e => e.grader_result!);
+        if (priorGraders.length > 0) {
+            const results = priorGraders.map(g =>
+                `- ${g.grader_type}: score=${g.score.toFixed(2)} — ${g.details}`
+            ).join('\n');
+            sections.push(`## Prior Grader Results (automated tests)\n${results}`);
+        }
+
+        const transcript = sections.join('\n\n');
+
+        const prompt = `You are an evaluation judge. Score the following agent session on a scale from 0.0 to 1.0 based on the rubric below.
+
+IMPORTANT CONTEXT: The agent runs inside a CLI wrapper (e.g., Gemini CLI). The agent's tool calls (file edits, shell commands) appear as text in the "Agent Output" section. This is a real execution trace, not hallucination — the "Commands Executed" section shows the CLI invocation and its captured output. The "Prior Grader Results" section shows objective automated test results that verify the actual filesystem state after the agent ran.
 
 ## Rubric
 ${rubric}
 
-## Agent Transcript
+## Session Transcript
 ${transcript}
 
 Respond with ONLY a JSON object: {"score": <number>, "reasoning": "<brief explanation>"}`;

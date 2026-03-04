@@ -52,8 +52,9 @@ pnpm run eval _ --suite=workflow
 # Analytics (Normalized Gain)
 pnpm run analyze --logDir=./results
 
-# Transcript viewer
-pnpm run viewer                    # → http://localhost:3847
+# Preview results
+pnpm run preview                    # CLI report (default)
+pnpm run preview browser            # Web UI → http://localhost:3847
 ```
 
 ## Task Structure

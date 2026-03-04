@@ -173,9 +173,13 @@ async function main() {
             console.table(report.trials[0].grader_results.map(gr => ({
                 Grader: gr.grader_type,
                 Score: gr.score.toFixed(2),
-                Weight: gr.weight,
-                Details: gr.details.substring(0, 60)
+                Weight: gr.weight
             })));
+
+            // Print full reasoning for each grader
+            for (const gr of report.trials[0].grader_results) {
+                console.log(`  [${gr.grader_type}] ${gr.details}`);
+            }
             console.log(`\n${allPassed ? '✅ Validation PASSED' : '❌ Validation FAILED'} — reward: ${report.trials[0].reward.toFixed(2)}`);
             if (!allPassed) process.exit(1);
         } else {
@@ -198,11 +202,21 @@ async function main() {
                     Graders: t.grader_results.map(g => `${g.grader_type}:${g.score.toFixed(1)}`).join(' ')
                 })));
 
+                // Print LLM grader reasoning per trial
+                for (const trial of report.trials) {
+                    const llmGraders = trial.grader_results.filter(g => g.grader_type === 'llm_rubric');
+                    if (llmGraders.length > 0) {
+                        for (const g of llmGraders) {
+                            console.log(`  Trial ${trial.trial_id} [${g.grader_type}] score=${g.score.toFixed(2)}: ${g.details}`);
+                        }
+                    }
+                }
+
                 // Summary
                 const avgDur = report.trials.reduce((s, t) => s + t.duration_ms, 0) / report.trials.length;
                 const avgCmds = report.trials.reduce((s, t) => s + t.n_commands, 0) / report.trials.length;
                 const totalTokens = report.trials.reduce((s, t) => s + t.input_tokens + t.output_tokens, 0);
-                console.log(`  Pass Rate   ${(report.pass_rate * 100).toFixed(1)}%`);
+                console.log(`\n  Pass Rate   ${(report.pass_rate * 100).toFixed(1)}%`);
                 console.log(`  pass@${trials}      ${(report.pass_at_k * 100).toFixed(1)}%`);
                 console.log(`  pass^${trials}      ${(report.pass_pow_k * 100).toFixed(1)}%`);
                 console.log(`  Avg Duration ${(avgDur / 1000).toFixed(1)}s | Avg Commands ${avgCmds.toFixed(1)}`);

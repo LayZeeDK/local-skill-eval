@@ -64,7 +64,7 @@ function ollamaHealthOk(): MockRoute {
     };
 }
 
-function ollamaTagsWithModel(modelName: string = 'qwen3:4b'): MockRoute {
+function ollamaTagsWithModel(modelName: string = 'phi3.5:3.8b'): MockRoute {
     return {
         method: 'GET',
         pathPattern: '/api/tags',
@@ -206,7 +206,7 @@ async function main() {
         await (grader as any).callOllama('my test prompt', 'http://localhost:11434', config);
 
         assert(capturedBody !== null, 'request body should have been captured');
-        assert(capturedBody.model === 'qwen3:4b', `model should be qwen3:4b, got: ${capturedBody.model}`);
+        assert(capturedBody.model === 'phi3.5:3.8b', `model should be phi3.5:3.8b, got: ${capturedBody.model}`);
         assert(capturedBody.prompt === 'my test prompt', 'prompt should match');
         assert(capturedBody.stream === false, 'stream should be false');
         assert(capturedBody.format === undefined, 'format should not be set (incompatible with thinking models)');
@@ -348,7 +348,7 @@ async function main() {
 
             if (url === 'http://localhost:11434/api/tags') {
                 return new Response(JSON.stringify({
-                    models: [{ name: 'qwen3:4b' }],
+                    models: [{ name: 'phi3.5:3.8b' }],
                 }), { status: 200, headers: { 'Content-Type': 'application/json' } });
             }
 
@@ -487,7 +487,7 @@ async function main() {
         }
     });
 
-    await test('default model is qwen3:4b when config.model is undefined', async () => {
+    await test('default model is phi3.5:3.8b when config.model is undefined', async () => {
         let capturedModel: string = '';
 
         globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -508,7 +508,7 @@ async function main() {
 
         const config = makeConfig({ model: undefined });
         await (grader as any).callOllama('prompt', 'http://localhost:11434', config);
-        assert(capturedModel === 'qwen3:4b', `default model should be qwen3:4b, got: ${capturedModel}`);
+        assert(capturedModel === 'phi3.5:3.8b', `default model should be phi3.5:3.8b, got: ${capturedModel}`);
     });
 
     await test('config.model overrides default (e.g., config.model = "llama3.2:latest")', async () => {
@@ -548,7 +548,7 @@ async function main() {
 
             if (url === 'http://custom-host:11434/api/tags') {
                 return new Response(JSON.stringify({
-                    models: [{ name: 'qwen3:4b' }],
+                    models: [{ name: 'phi3.5:3.8b' }],
                 }), { status: 200, headers: { 'Content-Type': 'application/json' } });
             }
 

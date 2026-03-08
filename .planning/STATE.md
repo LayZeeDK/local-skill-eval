@@ -7,7 +7,7 @@ stopped_at: Completed 02-07-PLAN.md (Ollama timeout fix, num_ctx, grader diagnos
 last_updated: "2026-03-08T23:00:53.614Z"
 last_activity: 2026-03-08 -- Phase 2 Plan 07 complete (Ollama timeout fix, num_ctx, grader diagnostics)
 progress:
-  total_phases: 3
+  total_phases: 4
   completed_phases: 2
   total_plans: 8
   completed_plans: 8
@@ -98,6 +98,10 @@ Recent decisions affecting current work:
 - Ollama LLM grader times out in bootstrap test on ARM64 (testing)
 - Add package.json scripts and CI workflow steps for Phase 2 tests (tooling)
 - Add @types/node to test file resolution path (testing)
+
+### Roadmap Evolution
+
+- Phase 2.1 inserted: Optimize grader model selection for local and CI ARM64 runners (uses Phase 2 supplementary research as starting point)
 
 ### Blockers/Concerns
 

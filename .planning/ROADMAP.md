@@ -14,6 +14,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: CI Foundation** - GitHub Actions workflow for typecheck, build, and deterministic tests with npm caching
 - [x] **Phase 2: Local LLM Grader** - Ollama-backed grader replacing cloud API calls, with health checks, structured output, and graceful degradation
+- [ ] **Phase 2.1: Optimize Grader Model Selection** _(INSERTED)_ - Benchmark grader models on local ARM64 and ubuntu-24.04-arm CI runners, verify through direct Ollama requests and e2e bootstrap test
 - [ ] **Phase 3: CI Evaluation Pipeline** - Ollama in CI with model caching, skill-eval workflow on PRs, and result artifacts
 
 ## Phase Details
@@ -52,9 +53,23 @@ Plans:
 - [x] 02-06-PLAN.md -- Gap closure: fix LocalProvider PATH separator for MSYS2 bash and suppress BASH_ENV
 - [x] 02-07-PLAN.md -- Gap closure: fix Ollama grader timeout (60s), add num_ctx 4096, surface grader failure details
 
+### Phase 2.1: Optimize Grader Model Selection _(INSERTED)_
+**Goal**: Find the best grader model for both local ARM64 (Snapdragon X Elite) and ubuntu-24.04-arm CI runners, using Phase 2 supplementary research as a starting point. Verify improvements through direct Ollama API requests and the skill-eval e2e bootstrap test.
+**Depends on**: Phase 2
+**Requirements**: TBD
+**Success Criteria** (what must be TRUE):
+  1. A grader model is selected that produces valid 0.0-1.0 scores within 60 seconds on both local Snapdragon X Elite and ubuntu-24.04-arm GitHub runners
+  2. Model selection is verified through direct Ollama API calls (not just unit tests) on both hardware targets
+  3. The e2e bootstrap test (`npm run test:bootstrap`) passes with the selected model producing llm_rubric scores > 0.0
+  4. Ollama environment tuning (flash attention, KV cache quantization, thread count) is validated on both platforms
+**Plans**: TBD
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 2.1 to break down)
+
 ### Phase 3: CI Evaluation Pipeline
 **Goal**: PRs automatically run skill evaluations with the local LLM grader on GitHub runners, with results available for cross-run comparison
-**Depends on**: Phase 2
+**Depends on**: Phase 2.1
 **Requirements**: CI-03, CI-04, CI-05, CI-06
 **Success Criteria** (what must be TRUE):
   1. A PR triggers a separate skill-eval workflow that runs evaluations using the local LLM grader on a GitHub runner (4 vCPU, 16GB RAM)
@@ -69,10 +84,11 @@ Plans:
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 -> 2 -> 3
+Phases execute in numeric order: 1 -> 2 -> 2.1 -> 3
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. CI Foundation | 1/1 | Complete | 2026-03-08 |
 | 2. Local LLM Grader | 7/7 | Complete | 2026-03-08 |
+| 2.1. Optimize Grader Model Selection | 0/? | Not started | - |
 | 3. CI Evaluation Pipeline | 0/? | Not started | - |

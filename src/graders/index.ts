@@ -150,7 +150,7 @@ Respond with ONLY a JSON object: {"score": <number>, "reasoning": "<brief explan
                     grader_type: 'llm_rubric',
                     score: 0,
                     weight: config.weight,
-                    details: `Ollama is ${ollamaStatus.error}. No LLM grading available (Ollama not running, no GEMINI_API_KEY or ANTHROPIC_API_KEY set)`
+                    details: `No LLM grading available (${ollamaStatus.error}, no GEMINI_API_KEY or ANTHROPIC_API_KEY set)`
                 };
             }
 
@@ -168,11 +168,15 @@ Respond with ONLY a JSON object: {"score": <number>, "reasoning": "<brief explan
             return this.callAnthropic(prompt, anthropicKey, config);
         }
 
+        const reason = ollamaStatus.available
+            ? 'Ollama generation failed'
+            : (ollamaStatus.error || 'Ollama not available');
+
         return {
             grader_type: 'llm_rubric',
             score: 0,
             weight: config.weight,
-            details: 'No LLM grading available (Ollama not running, no GEMINI_API_KEY or ANTHROPIC_API_KEY set)'
+            details: `No LLM grading available (${reason}, no GEMINI_API_KEY or ANTHROPIC_API_KEY set)`
         };
     }
 
@@ -268,20 +272,15 @@ Respond with ONLY a JSON object: {"score": <number>, "reasoning": "<brief explan
 
             lastResult = result;
 
-            // Successful parse (score > 0): return immediately
-            if (result.score > 0) {
+            // Valid parse (including score=0): return immediately
+            if (!result.details.startsWith('Failed to parse')) {
                 return result;
             }
 
-            // Parse failure (score=0 with "Failed to parse"): retry unless last attempt
-            if (result.details.startsWith('Failed to parse') && attempt < maxRetries) {
+            // Parse failure: retry with backoff unless last attempt
+            if (attempt < maxRetries) {
                 await new Promise(resolve => setTimeout(resolve, attempt * 1000));
                 continue;
-            }
-
-            // Last attempt or score=0 with valid parse: return as-is
-            if (attempt === maxRetries) {
-                return null;
             }
         }
 

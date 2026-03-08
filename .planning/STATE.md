@@ -80,7 +80,9 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-None yet.
+2 pending:
+- Fix Node.js not found in LocalProvider workspace (tooling)
+- Add task bin directory to PATH in LocalProvider (tooling)
 
 ### Blockers/Concerns
 

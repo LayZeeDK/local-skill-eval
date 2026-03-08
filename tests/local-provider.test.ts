@@ -16,6 +16,21 @@ function assert(condition: boolean, message: string) {
     }
 }
 
+async function removeWithRetry(dir: string, retries = 5, delayMs = 200): Promise<void> {
+    for (let i = 0; i < retries; i++) {
+        try {
+            await fs.remove(dir);
+            return;
+        } catch (err: any) {
+            if (i === retries - 1) {
+                throw err;
+            }
+
+            await new Promise(resolve => setTimeout(resolve, delayMs));
+        }
+    }
+}
+
 async function runTests() {
     const provider = new LocalProvider();
     let passed = 0;
@@ -43,7 +58,7 @@ async function runTests() {
             `Expected first PATH entry to include workspace ID '${workspaceId}', got ${firstEntry}`);
         assert(result.exitCode === 0, `Expected exit code 0, got ${result.exitCode}`);
 
-        await fs.remove(workspace);
+        await removeWithRetry(workspace);
         console.log('  PASS: workspace bin/ is first on PATH');
         passed++;
     } catch (e: any) {
@@ -64,7 +79,7 @@ async function runTests() {
         assert(result.stdout.trim() === 'mytool-output', `Expected 'mytool-output', got '${result.stdout.trim()}'`);
         assert(result.exitCode === 0, `Expected exit code 0, got ${result.exitCode}`);
 
-        await fs.remove(workspace);
+        await removeWithRetry(workspace);
         console.log('  PASS: task-provided CLI is executable by name');
         passed++;
     } catch (e: any) {
@@ -80,7 +95,7 @@ async function runTests() {
         const result = await provider.runCommand(workspace, 'echo "$MY_CUSTOM_VAR"', { MY_CUSTOM_VAR: 'hello' });
         assert(result.stdout.trim() === 'hello', `Expected 'hello', got '${result.stdout.trim()}'`);
 
-        await fs.remove(workspace);
+        await removeWithRetry(workspace);
         console.log('  PASS: custom env vars are preserved');
         passed++;
     } catch (e: any) {

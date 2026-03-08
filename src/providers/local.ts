@@ -45,7 +45,9 @@ export class LocalProvider implements EnvironmentProvider {
                 env: {
                     ...process.env,
                     ...env,
-                    PATH: `${binDir}${path.delimiter}${currentPath}`,
+                    PATH: `${binDir}:${currentPath}`,
+                    BASH_ENV: undefined,
+                    ENV: undefined,
                 },
             });
 

@@ -57,16 +57,19 @@ Plans:
 ### Phase 2.1: Optimize Grader Model Selection _(INSERTED)_
 **Goal**: Find the best grader model for both local ARM64 (Snapdragon X Elite) and ubuntu-24.04-arm CI runners, using Phase 2 supplementary research as a starting point. Verify improvements through direct Ollama API requests and the skill-eval e2e bootstrap test.
 **Depends on**: Phase 2
-**Requirements**: TBD
+**Requirements**: SC-1, SC-2, SC-3, SC-4
 **Success Criteria** (what must be TRUE):
   1. A grader model is selected that produces valid 0.0-1.0 scores within 60 seconds on both local Snapdragon X Elite and ubuntu-24.04-arm GitHub runners
   2. Model selection is verified through direct Ollama API calls (not just unit tests) on both hardware targets
   3. The e2e bootstrap test (`npm run test:bootstrap`) passes with the selected model producing llm_rubric scores > 0.0
   4. Ollama environment tuning (flash attention, KV cache quantization, thread count) is validated on both platforms
-**Plans**: TBD
+**Plans**: 4 plans
 
 Plans:
-- [ ] TBD (run /gsd:plan-phase 2.1 to break down)
+- [ ] 02.1-01-PLAN.md -- Benchmark harness: test fixtures, TypeScript benchmark script, and Ollama lifecycle wrapper shell script
+- [ ] 02.1-02-PLAN.md -- CI benchmark workflow with ai-action/setup-ollama, model caching, and artifact upload
+- [ ] 02.1-03-PLAN.md -- Run local benchmarks, apply results to callOllama (model, JSON Schema, defaults), clean up GraderConfig
+- [ ] 02.1-04-PLAN.md -- CI env vars, Ollama config warning, README docs, BENCHMARK.md report, cleanup
 
 ### Phase 3: CI Evaluation Pipeline
 **Goal**: PRs automatically run skill evaluations with the local LLM grader on GitHub runners, with results available for cross-run comparison
@@ -91,5 +94,5 @@ Phases execute in numeric order: 1 -> 2 -> 2.1 -> 3
 |-------|----------------|--------|-----------|
 | 1. CI Foundation | 1/1 | Complete | 2026-03-08 |
 | 2. Local LLM Grader | 8/8 | Complete | 2026-03-09 |
-| 2.1. Optimize Grader Model Selection | 0/? | Not started | - |
+| 2.1. Optimize Grader Model Selection | 0/4 | Not started | - |
 | 3. CI Evaluation Pipeline | 0/? | Not started | - |

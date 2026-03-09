@@ -112,6 +112,12 @@ Recent decisions affecting current work:
 
 None yet.
 
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 1 | Split CI workflow into test-integration and test-unit | 2026-03-09 | 47f43a3 | [1-split-ci-workflow-into-test-integration-](./quick/1-split-ci-workflow-into-test-integration-/) |
+
 ## Session Continuity
 
 Last session: 2026-03-09T07:02:35Z

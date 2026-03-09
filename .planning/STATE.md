@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: completed
-stopped_at: Completed quick-2-PLAN.md (remove redundant typecheck job from CI)
-last_updated: "2026-03-09T07:07:46Z"
-last_activity: 2026-03-09 -- Quick Plan 2 complete (removed redundant typecheck job and script)
+stopped_at: Completed quick-3-PLAN.md (content-hash Docker image naming)
+last_updated: "2026-03-09T13:55:00Z"
+last_activity: 2026-03-09 -- Quick Plan 3 complete (content-hash Docker image naming with cache-hit detection)
 progress:
   total_phases: 4
   completed_phases: 2
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-08)
 
 **Core value:** Run skill evaluations entirely offline using local LLMs -- no API keys, no cloud costs, no network dependency.
-**Current focus:** Phase 2 complete. Quick tasks 1-2 done (CI consolidation, typecheck removal). Ready for Phase 2.1 or Phase 3.
+**Current focus:** Phase 2 complete. Quick tasks 1-3 done. Ready for Phase 2.1 or Phase 3.
 
 ## Current Position
 
 Phase: 2 of 3 (Local LLM Grader) -- COMPLETE
 Plan: 8 of 8 in current phase -- COMPLETE
-Status: Phase 2 complete, quick tasks 1-2 done (CI consolidation, typecheck removal), ready for Phase 2.1 or Phase 3
-Last activity: 2026-03-09 -- Quick Plan 2 complete (removed redundant typecheck job and script)
+Status: Phase 2 complete, quick tasks 1-3 done, ready for Phase 2.1 or Phase 3
+Last activity: 2026-03-09 -- Quick Plan 3 complete (content-hash Docker image naming with cache-hit detection)
 
 Progress: [██████████] 100%
 
@@ -62,6 +62,7 @@ Progress: [██████████] 100%
 | Phase 02 P08 | 3min | 2 tasks | 3 files |
 | Quick P01 | 1min | 1 tasks | 1 files |
 | Quick P02 | 1min | 1 tasks | 2 files |
+| Quick P03 | 5min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -99,11 +100,11 @@ Recent decisions affecting current work:
 - [Phase 02]: Assert bin/ precedes /usr/bin (not first entry) in PATH tests
 - [Phase 02]: Secret sanitization checks absence of raw secret only (not [REDACTED] marker)
 - [Quick 2]: Typecheck job redundant because tsc build already validates types in single pass
+- [Quick 3]: 8-char SHA-256 content hash for Docker image naming; preserve images in teardown for cache reuse
 
 ### Pending Todos
 
-1 pending:
-- Apply and verify Docker image speed optimizations (providers)
+None.
 
 ### Roadmap Evolution
 
@@ -119,9 +120,10 @@ None yet.
 |---|-------------|------|--------|-----------|
 | 1 | Split CI workflow into test-integration and test-unit | 2026-03-09 | 47f43a3 | [1-split-ci-workflow-into-test-integration-](./quick/1-split-ci-workflow-into-test-integration-/) |
 | 2 | Remove redundant typecheck job from CI | 2026-03-09 | 13dfee0 | [2-remove-redundant-typecheck-job](./quick/2-remove-redundant-typecheck-job/) |
+| 3 | Content-hash Docker image naming | 2026-03-09 | 2903a5f | [3-resolve-todo-1-content-hash-docker-image](./quick/3-resolve-todo-1-content-hash-docker-image/) |
 
 ## Session Continuity
 
-Last session: 2026-03-09T07:07:46Z
-Stopped at: Completed quick-2-PLAN.md (remove redundant typecheck job from CI)
+Last session: 2026-03-09T13:55:00Z
+Stopped at: Completed quick-3-PLAN.md (content-hash Docker image naming)
 Resume file: None

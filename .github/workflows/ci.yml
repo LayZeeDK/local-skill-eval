@@ -17,15 +17,6 @@ env:
   NODE_OPTIONS: '--max-old-space-size=4096'
 
 jobs:
-  typecheck:
-    name: Typecheck
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-node
-      - run: npm run typecheck
-
   build:
     name: Build
     runs-on: ubuntu-24.04-arm

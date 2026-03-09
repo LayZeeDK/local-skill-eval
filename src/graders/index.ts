@@ -56,6 +56,7 @@ export class DeterministicGrader implements Grader {
  */
 export class LLMGrader implements Grader {
     private warnedAboutConfig = false;
+    private warmedUp = false;
 
     private warnOllamaConfig(): void {
         if (this.warnedAboutConfig) {
@@ -86,6 +87,34 @@ export class LLMGrader implements Grader {
             for (const w of warnings) {
                 console.warn(`  - ${w}`);
             }
+        }
+    }
+
+    private async warmUp(ollamaHost: string, model: string): Promise<void> {
+        if (this.warmedUp) {
+            return;
+        }
+
+        this.warmedUp = true;
+        const start = Date.now();
+        console.log(`[LLMGrader] Warming up ${model}...`);
+
+        try {
+            await fetch(`${ollamaHost}/api/generate`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    model,
+                    prompt: 'hi',
+                    stream: false,
+                    options: { num_predict: 1 },
+                }),
+                signal: AbortSignal.timeout(120_000),
+            });
+            const elapsed = Date.now() - start;
+            console.log(`[LLMGrader] Model warm (${elapsed}ms)`);
+        } catch (err: any) {
+            const elapsed = Date.now() - start;
+            console.warn(`[LLMGrader] Warmup failed after ${elapsed}ms: ${err?.message || err}`);
         }
     }
 
@@ -168,6 +197,7 @@ Respond with ONLY a JSON object: {"score": <number>, "reasoning": "<brief explan
         const ollamaStatus = await this.checkOllamaAvailability(ollamaHost, model);
 
         if (ollamaStatus.available) {
+            await this.warmUp(ollamaHost, model);
             this.warnOllamaConfig();
             const ollamaResult = await this.callOllamaWithRetry(prompt, ollamaHost, config);
 

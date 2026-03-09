@@ -1,12 +1,13 @@
 ---
-status: resolved
+status: complete
 phase: 02-local-llm-grader
-source: 02-01-SUMMARY.md, 02-02-SUMMARY.md, 02-03-SUMMARY.md, 02-04-SUMMARY.md, 02-05-SUMMARY.md
+source: 02-01-SUMMARY.md, 02-02-SUMMARY.md, 02-03-SUMMARY.md, 02-04-SUMMARY.md, 02-05-SUMMARY.md, 02-06-SUMMARY.md, 02-07-SUMMARY.md
 started: 2026-03-08T22:30:00Z
-updated: 2026-03-08T22:56:01Z
+updated: 2026-03-09T00:12:00Z
 ---
 
 ## Current Test
+<!-- OVERWRITE each test - shows where we are -->
 
 [testing complete]
 
@@ -27,14 +28,14 @@ result: pass
 ### 4. Local Provider PATH Augmentation
 expected: Run `npx ts-node tests/local-provider.test.ts`. All 3 tests pass confirming: workspace bin/ is prepended to PATH in spawned bash processes, task CLI tools are executable by name (not requiring absolute paths), and custom environment variables are preserved alongside the PATH augmentation.
 result: issue
-reported: "FAIL: workspace bin/ is first on PATH - FAIL: Expected first PATH entry to end with /bin, got /usr/local/sbin. FAIL: task-provided CLI is executable by name - EBUSY: resource busy or locked, rmdir temp dir. FAIL: custom env vars are preserved - FAIL: Expected 'hello', got ''"
+reported: "FAIL: workspace bin/ is first on PATH - FAIL: Expected first PATH entry to end with /bin, got /usr/local/sbin. PASS: task-provided CLI is executable by name. FAIL: custom env vars are preserved - FAIL: Expected 'hello', got ''. Note: passes from Git Bash but fails from PowerShell terminal."
 severity: major
 
 ### 5. Bootstrap End-to-End Test
 expected: Run `npm run test:bootstrap` with Ollama running. LLM grader produces an actual 0.0-1.0 score from Ollama inference (not 0.00 from timeout). Deterministic grader scores 1.0. This verifies Success Criterion 1: Ollama produces real LLM grading scores with no cloud API keys.
 result: issue
-reported: "llm_rubric scored 0.00 despite Ollama running. Ollama is up (curl confirms) but qwen3:4b inference does not complete within the timeout on ARM64 CPU. Deterministic grader works (1.00) but the primary Phase 2 deliverable -- local LLM grading producing a real score -- is not met."
-severity: blocker
+reported: "Core LLM grading works: llm_rubric=1.00 and deterministic=1.00 across Local (1-trial, 3-trial, with logDir) and Docker provider tests. However, the Secret Injection & Sanitization test fails: reward=0.00, agent ran only 1 command in 10s ('Checking for secret...'), did not follow superlint workflow. Both graders scored 0.00. Secret test appears to alter agent behavior away from normal task workflow."
+severity: minor
 
 ## Summary
 
@@ -47,19 +48,20 @@ skipped: 0
 ## Gaps
 
 - truth: "workspace bin/ is prepended to PATH in spawned bash processes, CLI tools executable by name, custom env vars preserved"
-  status: resolved
-  reason: "User reported: All 3 local-provider tests fail. PATH entry is /usr/local/sbin not /bin, EBUSY on temp dir cleanup, custom env var empty string instead of expected value"
+  status: failed
+  reason: "User reported: 2/3 tests fail from PowerShell. PATH first entry is /usr/local/sbin (not bin/), custom env var empty. Tool-by-name test passes. All 3 pass from Git Bash but not PowerShell."
   severity: major
   test: 4
-  root_cause: "PATH fix in 9188bc9 uses path.delimiter (;) on Windows but MSYS2/Git Bash translates semicolon-separated PATH at shell startup, potentially reordering entries. BASH_ENV from parent process may source a startup file that resets PATH and clobbers custom env vars. EBUSY on temp dir cleanup is Windows file-locking race (Defender/Search Indexer holding scan lock after process exit)."
+  root_cause: "MSYS2 bash startup scripts (sourced when parent is PowerShell, not Git Bash) prepend default paths (/usr/local/sbin etc.) and may clear custom env vars. Plan 06 fixes (colon separator, BASH_ENV=undefined) are insufficient: (1) BASH_ENV:undefined in env object becomes string 'undefined' on some Node.js versions, or is stripped but /etc/profile still runs. (2) Need bash --norc --noprofile -c to suppress ALL startup scripts. (3) Must delete all case-variants of Path/PATH from spread env to avoid duplicate keys on Windows."
   artifacts:
     - path: "src/providers/local.ts"
-      issue: "PATH prepend uses path.delimiter but MSYS2 translation may reorder; BASH_ENV not suppressed in spawn env"
+      issue: "spawn uses shell:'bash' which invokes bash -c (allows profile sourcing); env spread may create both Path and PATH keys"
     - path: "tests/local-provider.test.ts"
-      issue: "Assertions may not account for MSYS2 PATH reordering and Windows file-locking on cleanup"
+      issue: "Tests pass from Git Bash but fail from PowerShell — environment-dependent"
   missing:
-    - "Suppress BASH_ENV and ENV in spawned env to prevent startup files from clobbering PATH and env vars"
-    - "Add retry/delay for temp dir cleanup on Windows to handle file-locking race"
+    - "Use spawn('bash', ['--norc', '--noprofile', '-c', command]) instead of spawn(command, {shell:'bash'})"
+    - "Delete all case-variants of Path/PATH from process.env spread before setting PATH"
+    - "Use delete instead of undefined for BASH_ENV/ENV removal"
   debug_session: ""
 
 - truth: "Running an evaluation with Ollama produces 0.0-1.0 LLM scores using local model with no cloud API keys"
@@ -82,3 +84,13 @@ skipped: 0
     - "Switch default model to a non-thinking model (e.g. phi3.5:3.8b) or make model configurable per task"
     - "Surface grader failure details in evalRunner output when score is 0"
   debug_session: ".planning/debug/ollama-grader-score-zero-arm64.md"
+
+- truth: "Secret injection test: agent receives injected secret, follows normal task workflow, secret is redacted from logs"
+  status: failed
+  reason: "User reported: Secret Injection & Sanitization test fails with reward=0.00. Agent ran only 1 command in 10s ('Checking for secret...'), did not follow superlint workflow. Both graders scored 0.00. Core LLM grading works (llm_rubric=1.00 in all other tests)."
+  severity: minor
+  test: 5
+  root_cause: ""
+  artifacts: []
+  missing: []
+  debug_session: ""

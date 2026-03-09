@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: "CI benchmark workflow created (Plan 02); next: run benchmarks and analyze results (Plan 03)"
-stopped_at: Completed 02.1-02-PLAN.md
-last_updated: "2026-03-09T11:40:34Z"
-last_activity: 2026-03-09 -- Phase 2.1 Plan 02 complete (CI benchmark workflow)
+status: "Benchmark results applied (Plan 03); next: CI integration with qwen2.5:3b (Plan 04)"
+stopped_at: Completed 02.1-03-PLAN.md
+last_updated: "2026-03-09T13:36:10.167Z"
+last_activity: 2026-03-09 -- Phase 2.1 Plan 03 complete (benchmark-validated defaults)
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 13
-  completed_plans: 11
-  percent: 85
+  completed_plans: 12
+  percent: 92
 ---
 
 # Project State
@@ -26,18 +26,18 @@ See: .planning/PROJECT.md (updated 2026-03-08)
 ## Current Position
 
 Phase: 2.1 of 3 (Optimize Grader Model Selection) -- IN PROGRESS
-Plan: 2 of 4 in current phase -- COMPLETE
-Status: CI benchmark workflow created (Plan 02); next: run benchmarks and analyze results (Plan 03)
-Last activity: 2026-03-09 -- Phase 2.1 Plan 02 complete (CI benchmark workflow)
+Plan: 3 of 4 in current phase -- COMPLETE
+Status: Benchmark results applied (Plan 03); next: CI integration with qwen2.5:3b (Plan 04)
+Last activity: 2026-03-09 -- Phase 2.1 Plan 03 complete (benchmark-validated defaults)
 
-Progress: [████████░░] 85%
+Progress: [█████████░] 92%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 11
+- Total plans completed: 12
 - Average duration: 4 min
-- Total execution time: 45 min
+- Total execution time: 48 min
 
 **By Phase:**
 
@@ -45,10 +45,10 @@ Progress: [████████░░] 85%
 |-------|-------|-------|----------|
 | 1. CI Foundation | 1/1 | 3 min | 3 min |
 | 2. Local LLM Grader | 8/8 | 36 min | 5 min |
-| 2.1. Optimize Grader Model Selection | 2/4 | 6 min | 3 min |
+| 2.1. Optimize Grader Model Selection | 3/4 | 9 min | 3 min |
 
 **Recent Trend:**
-- Last 5 plans: 02-07 (2 min), 02-08 (3 min), Quick-03 (5 min), 02.1-01 (4 min), 02.1-02 (2 min)
+- Last 5 plans: 02-08 (3 min), Quick-03 (5 min), 02.1-01 (4 min), 02.1-02 (2 min), 02.1-03 (3 min)
 - Trend: stable
 
 *Updated after each plan completion*
@@ -66,6 +66,7 @@ Progress: [████████░░] 85%
 | Quick P03 | 5min | 2 tasks | 3 files |
 | Phase 02.1 P01 | 4min | 2 tasks | 5 files |
 | Phase 02.1 P02 | 2min | 2 tasks | 2 files |
+| Phase 02.1 P03 | 3min | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -110,6 +111,9 @@ Recent decisions affecting current work:
 - [Phase 02.1]: 120s hard timeout per /api/generate call; CPU cores detected at runtime for num_thread
 - [Phase 02.1]: 60-minute CI workflow timeout accounts for model pull time plus benchmark execution
 - [Phase 02.1]: OLLAMA_NUM_THREAD=4 hardcoded for CI 4-vCPU runners (vs 12 for local Snapdragon)
+- [Phase 02.1]: qwen2.5:3b as default grader model -- perfect discrimination in benchmark (positive=1.0, empty=0.0, wrong=0.0)
+- [Phase 02.1]: JSON Schema format unconditional for Ollama -- 100% validity across all benchmark profiles
+- [Phase 02.1]: Hardcoded Ollama params (num_ctx=8192, num_predict=512, timeout=60s) -- benchmark-validated, removed from GraderConfig
 
 ### Pending Todos
 
@@ -133,6 +137,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-09T11:40:34Z
-Stopped at: Completed 02.1-02-PLAN.md
+Last session: 2026-03-09T13:34:15Z
+Stopped at: Completed 02.1-03-PLAN.md
 Resume file: None

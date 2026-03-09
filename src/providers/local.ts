@@ -98,15 +98,9 @@ export class LocalProvider implements EnvironmentProvider {
 
     async runCommand(workspacePath: string, command: string, env?: Record<string, string>): Promise<CommandResult> {
         return new Promise((resolve) => {
-            const binDir = path.join(workspacePath, 'bin');
-            const currentPath = env?.PATH ?? process.env.PATH ?? '';
-
-            // On Windows, PATH entries are separated by semicolons.
-            // MSYS2 bash converts them to POSIX format automatically.
-            // Using colons on Windows breaks drive-letter paths (e.g. "C:\..." splits into "C" + "\...").
-            const sep = process.platform === 'win32' ? ';' : ':';
-
-            // Build a clean env object: remove all case-variants of PATH so only our canonical PATH survives
+            // Build env: pass all process env + caller overrides (except PATH).
+            // PATH is prepended inside the shell after login profile has run,
+            // so the login profile cannot push workspace bin/ down the PATH.
             const baseEnv = { ...process.env };
 
             for (const key of Object.keys(baseEnv)) {
@@ -115,32 +109,21 @@ export class LocalProvider implements EnvironmentProvider {
                 }
             }
 
-            // Remove BASH_ENV and ENV so bash does not source extra startup files
-            delete baseEnv['BASH_ENV'];
-            delete baseEnv['ENV'];
-
-            const bashPath = process.platform === 'win32' ? resolveGitBash() : 'bash';
-
-            // On Windows, bash -c is non-login so /etc/profile is not sourced.
-            // MSYS2's /usr/bin (grep, sed, touch, etc.) must be added explicitly.
-            const gitUsrBin = process.platform === 'win32' && bashPath !== 'bash'
-                ? path.dirname(bashPath)
-                : '';
-            const pathParts = [binDir];
-
-            if (gitUsrBin) {
-                pathParts.push(gitUsrBin);
-            }
-
-            pathParts.push(currentPath);
-
             const childEnv = {
                 ...baseEnv,
                 ...env,
-                PATH: pathParts.join(sep),
             };
 
-            const child = spawn(bashPath, ['-c', command], {
+            const bashPath = process.platform === 'win32' ? resolveGitBash() : 'bash';
+
+            // Use --login so the full user environment is available (MSYS2 /usr/bin,
+            // FNM-managed node, user-installed CLIs, etc.). Prepend workspace bin/
+            // inside the shell so it takes precedence over everything the profile adds.
+            // Use $(pwd)/bin instead of the Node.js binDir path to avoid Windows drive
+            // letter colons (C:\...) being interpreted as PATH separators.
+            const wrappedCommand = `export PATH="$(pwd)/bin:\$PATH" && ${command}`;
+
+            const child = spawn(bashPath, ['--login', '-c', wrappedCommand], {
                 cwd: workspacePath,
                 env: childEnv,
             });

@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: completed
-stopped_at: Completed 02-08-PLAN.md (bash --norc --noprofile spawn, PATH dedup, sanitization fix)
-last_updated: "2026-03-09T00:41:41.605Z"
-last_activity: 2026-03-09 -- Phase 2 Plan 08 complete (bash --norc --noprofile spawn, PATH dedup, sanitization fix)
+stopped_at: Completed quick-1-PLAN.md (split CI workflow into test-integration and test-unit)
+last_updated: "2026-03-09T07:02:35Z"
+last_activity: 2026-03-09 -- Quick Plan 1 complete (CI test jobs consolidated into test-integration and test-unit)
 progress:
   total_phases: 4
   completed_phases: 2
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-08)
 
 **Core value:** Run skill evaluations entirely offline using local LLMs -- no API keys, no cloud costs, no network dependency.
-**Current focus:** Phase 2 complete. All 8 plans executed (including gap-closure plan 08). Ready for Phase 2.1 or Phase 3.
+**Current focus:** Phase 2 complete. Quick task 1 done (CI consolidation). Ready for Phase 2.1 or Phase 3.
 
 ## Current Position
 
 Phase: 2 of 3 (Local LLM Grader) -- COMPLETE
 Plan: 8 of 8 in current phase -- COMPLETE
-Status: Phase 2 complete (all gap-closure done), ready for Phase 2.1 or Phase 3
-Last activity: 2026-03-09 -- Phase 2 Plan 08 complete (bash --norc --noprofile spawn, PATH dedup, sanitization fix)
+Status: Phase 2 complete, quick task 1 done (CI consolidation), ready for Phase 2.1 or Phase 3
+Last activity: 2026-03-09 -- Quick Plan 1 complete (CI test jobs consolidated into test-integration and test-unit)
 
 Progress: [██████████] 100%
 
@@ -60,6 +60,7 @@ Progress: [██████████] 100%
 | Phase 02 P06 | 2min | 2 tasks | 2 files |
 | Phase 02 P07 | 2min | 3 tasks | 3 files |
 | Phase 02 P08 | 3min | 2 tasks | 3 files |
+| Quick P01 | 1min | 1 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -71,7 +72,7 @@ Recent decisions affecting current work:
 - GitHub Actions CI as first phase (safety net before behavioral changes)
 - Agent CLI backends (opencode, Claude Code) deferred to v2
 - Coarse granularity: 3 phases derived from 18 requirements
-- No combined test script -- CI runs test:bootstrap and test:analytics as separate parallel jobs
+- CI test jobs grouped by type: test-integration (bootstrap/e2e) and test-unit (analytics, ollama-grader, local-provider)
 - Composite action excludes checkout -- each job checks out separately
 - NODE_OPTIONS max-old-space-size=4096 at workflow env level
 - [Phase 01]: No combined test script -- CI runs test:bootstrap and test:analytics as separate parallel jobs
@@ -113,6 +114,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-09T00:32:05Z
-Stopped at: Completed 02-08-PLAN.md (bash --norc --noprofile spawn, PATH dedup, sanitization fix)
+Last session: 2026-03-09T07:02:35Z
+Stopped at: Completed quick-1-PLAN.md (split CI workflow into test-integration and test-unit)
 Resume file: None

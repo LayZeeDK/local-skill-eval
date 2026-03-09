@@ -14,7 +14,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: CI Foundation** - GitHub Actions workflow for typecheck, build, and deterministic tests with npm caching
 - [x] **Phase 2: Local LLM Grader** - Ollama-backed grader replacing cloud API calls, with health checks, structured output, and graceful degradation
-- [ ] **Phase 2.1: Optimize Grader Model Selection** _(INSERTED)_ - Benchmark grader models on local ARM64 and ubuntu-24.04-arm CI runners, verify through direct Ollama requests and e2e bootstrap test
+- [x] **Phase 2.1: Optimize Grader Model Selection** _(INSERTED)_ - Benchmark grader models on local ARM64 and ubuntu-24.04-arm CI runners, verify through direct Ollama requests and e2e bootstrap test
 - [ ] **Phase 3: CI Evaluation Pipeline** - Ollama in CI with model caching, skill-eval workflow on PRs, and result artifacts
 
 ## Phase Details
@@ -66,10 +66,10 @@ Plans:
 **Plans**: 4 plans
 
 Plans:
-- [ ] 02.1-01-PLAN.md -- Benchmark harness: test fixtures, TypeScript benchmark script, and Ollama lifecycle wrapper shell script
-- [ ] 02.1-02-PLAN.md -- CI benchmark workflow with ai-action/setup-ollama, model caching, and artifact upload
-- [ ] 02.1-03-PLAN.md -- Run local benchmarks, apply results to callOllama (model, JSON Schema, defaults), clean up GraderConfig
-- [ ] 02.1-04-PLAN.md -- CI env vars, Ollama config warning, README docs, BENCHMARK.md report, cleanup
+- [x] 02.1-01-PLAN.md -- Benchmark harness: test fixtures, TypeScript benchmark script, and Ollama lifecycle wrapper shell script
+- [x] 02.1-02-PLAN.md -- CI benchmark workflow with ai-action/setup-ollama, model caching, and artifact upload
+- [x] 02.1-03-PLAN.md -- Run local benchmarks, apply results to callOllama (model, JSON Schema, defaults), clean up GraderConfig
+- [x] 02.1-04-PLAN.md -- CI env vars, Ollama config warning, README docs, BENCHMARK.md report, cleanup
 
 ### Phase 3: CI Evaluation Pipeline
 **Goal**: PRs automatically run skill evaluations with the local LLM grader on GitHub runners, with results available for cross-run comparison
@@ -94,5 +94,5 @@ Phases execute in numeric order: 1 -> 2 -> 2.1 -> 3
 |-------|----------------|--------|-----------|
 | 1. CI Foundation | 1/1 | Complete | 2026-03-08 |
 | 2. Local LLM Grader | 8/8 | Complete | 2026-03-09 |
-| 2.1. Optimize Grader Model Selection | 3/4 | In Progress|  |
+| 2.1. Optimize Grader Model Selection | 4/4 | Complete | 2026-03-09 |
 | 3. CI Evaluation Pipeline | 0/? | Not started | - |

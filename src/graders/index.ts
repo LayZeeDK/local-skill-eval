@@ -55,6 +55,34 @@ export class DeterministicGrader implements Grader {
  * Tries Ollama first (local, no API key), then falls back to Gemini/Anthropic cloud providers.
  */
 export class LLMGrader implements Grader {
+    private warnedAboutConfig = false;
+
+    private warnOllamaConfig(): void {
+        if (this.warnedAboutConfig) {
+            return;
+        }
+
+        this.warnedAboutConfig = true;
+
+        const warnings: string[] = [];
+
+        if (!process.env.OLLAMA_FLASH_ATTENTION) {
+            warnings.push('OLLAMA_FLASH_ATTENTION not set -- flash attention disabled');
+        }
+
+        if (!process.env.OLLAMA_KV_CACHE_TYPE) {
+            warnings.push('OLLAMA_KV_CACHE_TYPE not set -- using FP16 KV cache (higher RAM usage)');
+        }
+
+        if (warnings.length > 0) {
+            console.warn(`[LLMGrader] Suboptimal Ollama configuration detected (set env vars before starting "ollama serve"):`);
+
+            for (const w of warnings) {
+                console.warn(`  - ${w}`);
+            }
+        }
+    }
+
     async grade(
         _workspace: string,
         _provider: EnvironmentProvider,
@@ -134,6 +162,7 @@ Respond with ONLY a JSON object: {"score": <number>, "reasoning": "<brief explan
         const ollamaStatus = await this.checkOllamaAvailability(ollamaHost, model);
 
         if (ollamaStatus.available) {
+            this.warnOllamaConfig();
             const ollamaResult = await this.callOllamaWithRetry(prompt, ollamaHost, config);
 
             if (ollamaResult) {

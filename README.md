@@ -161,6 +161,29 @@ DEBUG=true
 
 All values are automatically **redacted** from persisted session logs.
 
+## Ollama Configuration
+
+For optimal performance with the local LLM grader, set these environment variables **before** starting `ollama serve`:
+
+| Variable | Recommended | Purpose |
+|----------|-------------|---------|
+| `OLLAMA_FLASH_ATTENTION` | `1` | Enable flash attention for faster inference |
+| `OLLAMA_KV_CACHE_TYPE` | `q8_0` | Use quantized KV cache (50% memory reduction vs FP16) |
+| `OLLAMA_NUM_PARALLEL` | `1` | Single request at a time (grading is sequential) |
+| `OLLAMA_NUM_THREAD` | CPU core count | Explicit thread count (workaround for ARM64 core detection bug) |
+
+Example (Linux/macOS):
+```bash
+OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q8_0 OLLAMA_NUM_PARALLEL=1 OLLAMA_NUM_THREAD=$(nproc) ollama serve
+```
+
+Example (Windows PowerShell):
+```powershell
+$env:OLLAMA_FLASH_ATTENTION="1"; $env:OLLAMA_KV_CACHE_TYPE="q8_0"; $env:OLLAMA_NUM_PARALLEL="1"; $env:OLLAMA_NUM_THREAD="12"; ollama serve
+```
+
+The LLM grader will warn at runtime if these variables are not detected.
+
 ## Security
 
 API keys are injected via environment variables and **automatically redacted** from all persisted logs.

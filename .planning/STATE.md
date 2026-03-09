@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: completed
-stopped_at: Completed 02-07-PLAN.md (Ollama timeout fix, num_ctx, grader diagnostics)
-last_updated: "2026-03-08T23:00:53.614Z"
-last_activity: 2026-03-08 -- Phase 2 Plan 07 complete (Ollama timeout fix, num_ctx, grader diagnostics)
+stopped_at: Completed 02-08-PLAN.md (bash spawn fix, PATH dedup, sanitization assertion)
+last_updated: "2026-03-09T00:36:00.000Z"
+last_activity: 2026-03-09 -- Phase 2 Plan 08 complete (bash --norc --noprofile spawn, PATH dedup, sanitization fix)
 progress:
   total_phases: 4
   completed_phases: 2
-  total_plans: 8
-  completed_plans: 8
+  total_plans: 9
+  completed_plans: 9
   percent: 100
 ---
 
@@ -21,33 +21,33 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-08)
 
 **Core value:** Run skill evaluations entirely offline using local LLMs -- no API keys, no cloud costs, no network dependency.
-**Current focus:** Phase 2 complete. All 7 plans executed. Ready for Phase 3.
+**Current focus:** Phase 2 complete. All 8 plans executed (including gap-closure plan 08). Ready for Phase 2.1 or Phase 3.
 
 ## Current Position
 
 Phase: 2 of 3 (Local LLM Grader) -- COMPLETE
-Plan: 7 of 7 in current phase -- COMPLETE
-Status: Phase 2 complete, ready for Phase 3
-Last activity: 2026-03-08 -- Phase 2 Plan 07 complete (Ollama timeout fix, num_ctx, grader diagnostics)
+Plan: 8 of 8 in current phase -- COMPLETE
+Status: Phase 2 complete (all gap-closure done), ready for Phase 2.1 or Phase 3
+Last activity: 2026-03-09 -- Phase 2 Plan 08 complete (bash --norc --noprofile spawn, PATH dedup, sanitization fix)
 
 Progress: [██████████] 100%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 8
-- Average duration: 5 min
-- Total execution time: 36 min
+- Total plans completed: 9
+- Average duration: 4 min
+- Total execution time: 39 min
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 1. CI Foundation | 1/1 | 3 min | 3 min |
-| 2. Local LLM Grader | 7/7 | 33 min | 5 min |
+| 2. Local LLM Grader | 8/8 | 36 min | 5 min |
 
 **Recent Trend:**
-- Last 5 plans: 02-03 (2 min), 02-04 (2 min), 02-05 (15 min), 02-06 (2 min), 02-07 (2 min)
+- Last 5 plans: 02-04 (2 min), 02-05 (15 min), 02-06 (2 min), 02-07 (2 min), 02-08 (3 min)
 - Trend: stable
 
 *Updated after each plan completion*
@@ -59,6 +59,7 @@ Progress: [██████████] 100%
 | Phase 02 P05 | 15min | 1 tasks | 0 files |
 | Phase 02 P06 | 2min | 2 tasks | 2 files |
 | Phase 02 P07 | 2min | 3 tasks | 3 files |
+| Phase 02 P08 | 3min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -91,6 +92,10 @@ Recent decisions affecting current work:
 - [Phase 02]: 60s default timeout for LLM grading (down from 5min) -- single response grading should not take 5 minutes
 - [Phase 02]: num_ctx 4096 default -- prevents Ollama's 2048 default which silently truncates grading prompts
 - [Phase 02]: Print grader details for scores below 0.5, not just 0 -- catches partial failures too
+- [Phase 02]: Use explicit bash --norc --noprofile spawn instead of shell:'bash' to prevent MSYS2 login-shell PATH rebuilding
+- [Phase 02]: Delete all PATH case-variants via Object.keys loop before composing childEnv
+- [Phase 02]: Assert bin/ precedes /usr/bin (not first entry) in PATH tests
+- [Phase 02]: Secret sanitization checks absence of raw secret only (not [REDACTED] marker)
 
 ### Pending Todos
 
@@ -109,6 +114,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-08T22:53:00Z
-Stopped at: Completed 02-07-PLAN.md (Ollama timeout fix, num_ctx, grader diagnostics)
+Last session: 2026-03-09T00:32:05Z
+Stopped at: Completed 02-08-PLAN.md (bash --norc --noprofile spawn, PATH dedup, sanitization fix)
 Resume file: None

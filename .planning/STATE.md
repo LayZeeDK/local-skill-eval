@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: completed
-stopped_at: Phase 2.1 context gathered
-last_updated: "2026-03-09T09:00:54.565Z"
-last_activity: 2026-03-09 -- Quick Plan 3 complete (content-hash Docker image naming with cache-hit detection)
+status: "Benchmark harness created (Plan 01); next: CI benchmark workflow (Plan 02)"
+stopped_at: Completed 02.1-01-PLAN.md
+last_updated: "2026-03-09T11:36:50.959Z"
+last_activity: 2026-03-09 -- Phase 2.1 Plan 01 complete (benchmark harness)
 progress:
   total_phases: 4
   completed_phases: 2
-  total_plans: 9
-  completed_plans: 9
-  percent: 100
+  total_plans: 13
+  completed_plans: 10
+  percent: 77
 ---
 
 # Project State
@@ -21,23 +21,23 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-08)
 
 **Core value:** Run skill evaluations entirely offline using local LLMs -- no API keys, no cloud costs, no network dependency.
-**Current focus:** Phase 2 complete. Quick tasks 1-3 done. Ready for Phase 2.1 or Phase 3.
+**Current focus:** Phase 2.1 in progress -- optimizing grader model selection with benchmark harness.
 
 ## Current Position
 
-Phase: 2 of 3 (Local LLM Grader) -- COMPLETE
-Plan: 8 of 8 in current phase -- COMPLETE
-Status: Phase 2 complete, quick tasks 1-3 done, ready for Phase 2.1 or Phase 3
-Last activity: 2026-03-09 -- Quick Plan 3 complete (content-hash Docker image naming with cache-hit detection)
+Phase: 2.1 of 3 (Optimize Grader Model Selection) -- IN PROGRESS
+Plan: 1 of 4 in current phase -- COMPLETE
+Status: Benchmark harness created (Plan 01); next: CI benchmark workflow (Plan 02)
+Last activity: 2026-03-09 -- Phase 2.1 Plan 01 complete (benchmark harness)
 
-Progress: [██████████] 100%
+Progress: [████████░░] 77%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 9
+- Total plans completed: 10
 - Average duration: 4 min
-- Total execution time: 39 min
+- Total execution time: 43 min
 
 **By Phase:**
 
@@ -45,9 +45,10 @@ Progress: [██████████] 100%
 |-------|-------|-------|----------|
 | 1. CI Foundation | 1/1 | 3 min | 3 min |
 | 2. Local LLM Grader | 8/8 | 36 min | 5 min |
+| 2.1. Optimize Grader Model Selection | 1/4 | 4 min | 4 min |
 
 **Recent Trend:**
-- Last 5 plans: 02-04 (2 min), 02-05 (15 min), 02-06 (2 min), 02-07 (2 min), 02-08 (3 min)
+- Last 5 plans: 02-06 (2 min), 02-07 (2 min), 02-08 (3 min), Quick-03 (5 min), 02.1-01 (4 min)
 - Trend: stable
 
 *Updated after each plan completion*
@@ -63,6 +64,7 @@ Progress: [██████████] 100%
 | Quick P01 | 1min | 1 tasks | 1 files |
 | Quick P02 | 1min | 1 tasks | 2 files |
 | Quick P03 | 5min | 2 tasks | 3 files |
+| Phase 02.1 P01 | 4min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -101,6 +103,10 @@ Recent decisions affecting current work:
 - [Phase 02]: Secret sanitization checks absence of raw secret only (not [REDACTED] marker)
 - [Quick 2]: Typecheck job redundant because tsc build already validates types in single pass
 - [Quick 3]: 8-char SHA-256 content hash for Docker image naming; preserve images in teardown for cache reuse
+- [Phase 02.1]: Synthetic positive fixture (Ollama not running during plan execution); mirrors realistic test:bootstrap output
+- [Phase 02.1]: Benchmark script standalone -- copies prompt construction from LLMGrader, no imports from src/
+- [Phase 02.1]: JSON Schema structured output as default format with no-schema fallback per model
+- [Phase 02.1]: 120s hard timeout per /api/generate call; CPU cores detected at runtime for num_thread
 
 ### Pending Todos
 
@@ -124,6 +130,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-09T09:00:54.562Z
-Stopped at: Phase 2.1 context gathered
-Resume file: .planning/phases/02.1-optimize-grader-model-selection/02.1-CONTEXT.md
+Last session: 2026-03-09T11:36:50.956Z
+Stopped at: Completed 02.1-01-PLAN.md
+Resume file: None

@@ -94,5 +94,5 @@ Phases execute in numeric order: 1 -> 2 -> 2.1 -> 3
 |-------|----------------|--------|-----------|
 | 1. CI Foundation | 1/1 | Complete | 2026-03-08 |
 | 2. Local LLM Grader | 8/8 | Complete | 2026-03-09 |
-| 2.1. Optimize Grader Model Selection | 0/4 | Not started | - |
+| 2.1. Optimize Grader Model Selection | 1/4 | In Progress|  |
 | 3. CI Evaluation Pipeline | 0/? | Not started | - |

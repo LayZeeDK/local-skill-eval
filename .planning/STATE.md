@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: completed
-stopped_at: Completed quick-1-PLAN.md (split CI workflow into test-integration and test-unit)
-last_updated: "2026-03-09T07:02:35Z"
-last_activity: 2026-03-09 -- Quick Plan 1 complete (CI test jobs consolidated into test-integration and test-unit)
+stopped_at: Completed quick-2-PLAN.md (remove redundant typecheck job from CI)
+last_updated: "2026-03-09T07:07:46Z"
+last_activity: 2026-03-09 -- Quick Plan 2 complete (removed redundant typecheck job and script)
 progress:
   total_phases: 4
   completed_phases: 2
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-08)
 
 **Core value:** Run skill evaluations entirely offline using local LLMs -- no API keys, no cloud costs, no network dependency.
-**Current focus:** Phase 2 complete. Quick task 1 done (CI consolidation). Ready for Phase 2.1 or Phase 3.
+**Current focus:** Phase 2 complete. Quick tasks 1-2 done (CI consolidation, typecheck removal). Ready for Phase 2.1 or Phase 3.
 
 ## Current Position
 
 Phase: 2 of 3 (Local LLM Grader) -- COMPLETE
 Plan: 8 of 8 in current phase -- COMPLETE
-Status: Phase 2 complete, quick task 1 done (CI consolidation), ready for Phase 2.1 or Phase 3
-Last activity: 2026-03-09 -- Quick Plan 1 complete (CI test jobs consolidated into test-integration and test-unit)
+Status: Phase 2 complete, quick tasks 1-2 done (CI consolidation, typecheck removal), ready for Phase 2.1 or Phase 3
+Last activity: 2026-03-09 -- Quick Plan 2 complete (removed redundant typecheck job and script)
 
 Progress: [██████████] 100%
 
@@ -61,6 +61,7 @@ Progress: [██████████] 100%
 | Phase 02 P07 | 2min | 3 tasks | 3 files |
 | Phase 02 P08 | 3min | 2 tasks | 3 files |
 | Quick P01 | 1min | 1 tasks | 1 files |
+| Quick P02 | 1min | 1 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -97,6 +98,7 @@ Recent decisions affecting current work:
 - [Phase 02]: Delete all PATH case-variants via Object.keys loop before composing childEnv
 - [Phase 02]: Assert bin/ precedes /usr/bin (not first entry) in PATH tests
 - [Phase 02]: Secret sanitization checks absence of raw secret only (not [REDACTED] marker)
+- [Quick 2]: Typecheck job redundant because tsc build already validates types in single pass
 
 ### Pending Todos
 
@@ -117,9 +119,10 @@ None yet.
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 1 | Split CI workflow into test-integration and test-unit | 2026-03-09 | 47f43a3 | [1-split-ci-workflow-into-test-integration-](./quick/1-split-ci-workflow-into-test-integration-/) |
+| 2 | Remove redundant typecheck job from CI | 2026-03-09 | 13dfee0 | [2-remove-redundant-typecheck-job](./quick/2-remove-redundant-typecheck-job/) |
 
 ## Session Continuity
 
-Last session: 2026-03-09T07:02:35Z
-Stopped at: Completed quick-1-PLAN.md (split CI workflow into test-integration and test-unit)
+Last session: 2026-03-09T07:07:46Z
+Stopped at: Completed quick-2-PLAN.md (remove redundant typecheck job from CI)
 Resume file: None

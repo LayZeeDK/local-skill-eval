@@ -21,8 +21,8 @@ function main() {
     const content = fs.readFileSync(modelfilePath, 'utf-8');
 
     // Modelfile content assertions
-    assert(content.includes('FROM qwen3:8b'), 'Modelfile contains FROM qwen3:8b');
-    assert(content.includes('num_ctx 16384'), 'Modelfile contains num_ctx 16384 (OLCFG-01)');
+    assert(content.includes('FROM qwen3:4b'), 'Modelfile contains FROM qwen3:4b');
+    assert(content.includes('num_ctx 8192'), 'Modelfile contains num_ctx 8192 (OLCFG-01)');
     assert(content.includes('num_predict 4096'), 'Modelfile contains num_predict 4096 (OLCFG-02)');
     assert(content.includes('temperature 0'), 'Modelfile contains temperature 0 (deterministic)');
 

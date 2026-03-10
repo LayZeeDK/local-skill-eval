@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: opencode + Ollama Agent Backends
 status: executing
-stopped_at: Completed 04-01-PLAN.md
-last_updated: "2026-03-10T14:20:09.848Z"
-last_activity: 2026-03-10 -- Completed 04-01 (deps, Modelfile, tools, permissions)
+stopped_at: Completed 04-02-PLAN.md
+last_updated: "2026-03-10T14:25:49.779Z"
+last_activity: 2026-03-10 -- Completed 04-02 (OllamaToolAgent, CLI integration, smoke test, model unload)
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 3
-  completed_plans: 1
+  completed_plans: 2
 ---
 
 # Project State
@@ -25,9 +25,9 @@ See: .planning/PROJECT.md (updated 2026-03-10)
 ## Current Position
 
 Phase: Phase 4 (OllamaToolAgent + Ollama Model Setup)
-Plan: 2 of 3
-Status: Phase 4 Plan 01 complete, executing Plan 02
-Last activity: 2026-03-10 -- Completed 04-01 (deps, Modelfile, tools, permissions)
+Plan: 3 of 3
+Status: Phase 4 Plan 02 complete, executing Plan 03
+Last activity: 2026-03-10 -- Completed 04-02 (OllamaToolAgent, CLI integration, smoke test, model unload)
 
 ## Accumulated Context
 
@@ -40,6 +40,7 @@ Last activity: 2026-03-10 -- Completed 04-01 (deps, Modelfile, tools, permission
 
 Decisions logged in PROJECT.md Key Decisions table. v1.0 decisions archived to milestones/v1.0-ROADMAP.md.
 - [Phase 04]: Used picomatch { dot: true, bash: true } for flat string matching of bash commands (not path segments)
+- [Phase 04]: Used finally block for model unload to ensure cleanup even on agent errors
 
 ### Pending Todos
 
@@ -51,6 +52,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-10T14:20:09.846Z
-Stopped at: Completed 04-01-PLAN.md
+Last session: 2026-03-10T14:25:49.776Z
+Stopped at: Completed 04-02-PLAN.md
 Resume file: None

@@ -18,13 +18,13 @@ Requirements for v2.0 milestone. Each maps to roadmap phases.
 
 - [x] **OLCFG-01**: Ollama model identified and configured that supports tool calling for agent tasks
 - [x] **OLCFG-02**: Custom Modelfile overrides Ollama's 4K default context to a working size for agentic workflows
-- [ ] **OLCFG-03**: Sequential model loading prevents OOM -- agent model unloaded before grader loads
+- [x] **OLCFG-03**: Sequential model loading prevents OOM -- agent model unloaded before grader loads
 
 ### Eval Pipeline
 
-- [ ] **PIPE-01**: `--agent=ollama` CLI flag selects OllamaToolAgent as the agent backend
+- [x] **PIPE-01**: `--agent=ollama` CLI flag selects OllamaToolAgent as the agent backend
 - [ ] **PIPE-02**: `--agent=opencode` CLI flag selects OpenCodeAgent as the agent backend
-- [ ] **PIPE-03**: Tool-calling smoke test gates evaluation -- catches misconfigured models before starting a trial
+- [x] **PIPE-03**: Tool-calling smoke test gates evaluation -- catches misconfigured models before starting a trial
 - [ ] **PIPE-04**: OpenCodeAgent injects opencode.json config (Ollama provider, permissions, model) into workspace
 
 ### CI Integration
@@ -79,10 +79,10 @@ Tracked but not in current roadmap.
 | AGENT-04 | Phase 7 | Pending |
 | OLCFG-01 | Phase 4 | Complete |
 | OLCFG-02 | Phase 4 | Complete |
-| OLCFG-03 | Phase 4 | Pending |
-| PIPE-01 | Phase 4 | Pending |
+| OLCFG-03 | Phase 4 | Complete |
+| PIPE-01 | Phase 4 | Complete |
 | PIPE-02 | Phase 5 | Pending |
-| PIPE-03 | Phase 4 | Pending |
+| PIPE-03 | Phase 4 | Complete |
 | PIPE-04 | Phase 5 | Pending |
 | CI-01 | Phase 6 | Pending |
 | CI-02 | Phase 6 | Pending |

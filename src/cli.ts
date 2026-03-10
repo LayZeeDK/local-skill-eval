@@ -3,6 +3,8 @@ import { LocalProvider } from './providers/local';
 import { EvalRunner, loadTaskConfig } from './evalRunner';
 import { GeminiAgent } from './agents/gemini';
 import { ClaudeAgent } from './agents/claude';
+import { OllamaToolAgent } from './agents/ollama';
+import { smokeTestToolCalling } from './agents/ollama/smoke-test';
 import { BaseAgent } from './types';
 import * as path from 'path';
 import * as fs from 'fs-extra';
@@ -45,7 +47,7 @@ async function main() {
     if (!taskArg || taskArg === '--help' || taskArg === '-h') {
         console.log('Usage: npm run eval <task_name> [options]');
         console.log('\nOptions:');
-        console.log('  --agent=gemini|claude    Default: gemini');
+        console.log('  --agent=gemini|claude|ollama  Default: gemini');
         console.log('  --provider=docker|local  Default: docker');
         console.log('  --trials=N               Default: 5');
         console.log('  --parallel=N             Run trials concurrently (default: 1)');
@@ -184,9 +186,35 @@ async function main() {
             if (!allPassed) process.exit(1);
         } else {
             // Normal eval mode
-            const agent = agentType === 'claude' ? new ClaudeAgent() : new GeminiAgent();
 
-            console.log(`\n🚀 ${taskName} | agent=${agentType} provider=${providerType} trials=${trials}${parallel > 1 ? ` parallel=${parallel}` : ''}\n`);
+            // Smoke test gate for Ollama agent
+            if (agentType === 'ollama') {
+                const smokeResult = await smokeTestToolCalling('http://localhost:11434', 'qwen3-agent');
+
+                if (!smokeResult.passed) {
+                    console.error(`[ERROR] Ollama smoke test failed: ${smokeResult.error}`);
+                    process.exit(1);
+                }
+
+                console.log('[INFO] Ollama smoke test passed -- model produces structured tool calls');
+            }
+
+            // Create agent based on type
+            let agent: BaseAgent;
+
+            switch (agentType) {
+                case 'claude':
+                    agent = new ClaudeAgent();
+                    break;
+                case 'ollama':
+                    agent = new OllamaToolAgent();
+                    break;
+                default:
+                    agent = new GeminiAgent();
+                    break;
+            }
+
+            console.log(`\n${taskName} | agent=${agentType} provider=${providerType} trials=${trials}${parallel > 1 ? ` parallel=${parallel}` : ''}\n`);
 
             try {
                 const report = await runner.runEval(agent, taskPath, skillsPaths, trials, env, parallel);

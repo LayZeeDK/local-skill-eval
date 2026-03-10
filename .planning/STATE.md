@@ -51,6 +51,10 @@ Decisions logged in PROJECT.md Key Decisions table. v1.0 decisions archived to m
 
 None.
 
+### Roadmap Evolution
+
+- Phase 4.1 added: Tune Ollama agent to 5 min trial average (model/Ollama parameters, prompt engineering, alternative models)
+
 ### Blockers/Concerns
 
 - opencode linux-arm64 SIGABRT (issue #13367) -- verify in Phase 6, fallback to x64 runner

@@ -21,7 +21,8 @@ Full details: milestones/v1.0-ROADMAP.md
 
 ### v2.0: opencode + Ollama Agent Backends
 
-- [ ] Phase 4: OllamaToolAgent + Ollama Model Setup
+- [x] Phase 4: OllamaToolAgent + Ollama Model Setup
+- [ ] Phase 4.1: Tune Ollama Agent to 5 Min Trial Average
 - [ ] Phase 5: OpenCodeAgent
 - [ ] Phase 6: CI Integration
 - [ ] Phase 7: End-to-End Validation + Performance Comparison
@@ -32,12 +33,12 @@ Full details: milestones/v1.0-ROADMAP.md
 
 **Requirements:** AGENT-01, OLCFG-01, OLCFG-02, OLCFG-03, PIPE-01, PIPE-03
 
-**Plans:** 3 plans
+**Plans:** 3 plans (3/3 complete)
 
 Plans:
-- [ ] 04-01-PLAN.md -- Dependencies, Modelfile, tool definitions, and permission system
-- [ ] 04-02-PLAN.md -- OllamaToolAgent class, CLI wiring, smoke test gate
-- [ ] 04-03-PLAN.md -- End-to-end validation with superlint_demo
+- [x] 04-01-PLAN.md -- Dependencies, Modelfile, tool definitions, and permission system
+- [x] 04-02-PLAN.md -- OllamaToolAgent class, CLI wiring, smoke test gate
+- [x] 04-03-PLAN.md -- End-to-end validation with superlint_demo
 
 **Delivers:**
 - Ollama agent model pulled and configured with working context window (custom Modelfile)
@@ -51,6 +52,19 @@ Plans:
 - Ollama 4K default context silently breaks tool calling -- custom Modelfile required
 - Small models (8B) may emit tool calls as text instead of structured API -- smoke test catches this
 - Model must support tool calling natively (qwen3:8b is the candidate)
+
+---
+
+#### Phase 4.1: Tune Ollama Agent to 5 Min Trial Average
+
+**Goal:** Research and apply model/Ollama parameters and prompt engineering to get superlint_demo under 5 min average across 3 trial runs. Explore alternative models (qwen2.5:7b, other 4/7/8b models).
+
+**Requirements:** TBD
+**Depends on:** Phase 4
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 4.1 to break down)
 
 ---
 
@@ -118,7 +132,8 @@ Plans:
 | 2. Local LLM Grader | v1.0 | 8/8 | Complete | 2026-03-09 |
 | 2.1. Optimize Grader Model Selection | v1.0 | 4/4 | Complete | 2026-03-09 |
 | 3. CI Evaluation Pipeline | v1.0 | 2/2 | Complete | 2026-03-09 |
-| 4. OllamaToolAgent + Ollama Model Setup | v2.0 | 0/3 | Planned | -- |
+| 4. OllamaToolAgent + Ollama Model Setup | v2.0 | 3/3 | Complete | 2026-03-10 |
+| 4.1. Tune Ollama Agent to 5 Min Trial Average | v2.0 | 0/? | Not planned | -- |
 | 5. OpenCodeAgent | v2.0 | 0/? | Pending | -- |
 | 6. CI Integration | v2.0 | 0/? | Pending | -- |
 | 7. End-to-End Validation + Comparison | v2.0 | 0/? | Pending | -- |

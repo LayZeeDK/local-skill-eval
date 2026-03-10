@@ -32,6 +32,13 @@ Full details: milestones/v1.0-ROADMAP.md
 
 **Requirements:** AGENT-01, OLCFG-01, OLCFG-02, OLCFG-03, PIPE-01, PIPE-03
 
+**Plans:** 3 plans
+
+Plans:
+- [ ] 04-01-PLAN.md -- Dependencies, Modelfile, tool definitions, and permission system
+- [ ] 04-02-PLAN.md -- OllamaToolAgent class, CLI wiring, smoke test gate
+- [ ] 04-03-PLAN.md -- End-to-end validation with superlint_demo
+
 **Delivers:**
 - Ollama agent model pulled and configured with working context window (custom Modelfile)
 - `OllamaToolAgent` class with tool-calling loop (read_file, write_file, bash, list_directory)
@@ -111,7 +118,7 @@ Full details: milestones/v1.0-ROADMAP.md
 | 2. Local LLM Grader | v1.0 | 8/8 | Complete | 2026-03-09 |
 | 2.1. Optimize Grader Model Selection | v1.0 | 4/4 | Complete | 2026-03-09 |
 | 3. CI Evaluation Pipeline | v1.0 | 2/2 | Complete | 2026-03-09 |
-| 4. OllamaToolAgent + Ollama Model Setup | v2.0 | 0/? | Pending | — |
-| 5. OpenCodeAgent | v2.0 | 0/? | Pending | — |
-| 6. CI Integration | v2.0 | 0/? | Pending | — |
-| 7. End-to-End Validation + Comparison | v2.0 | 0/? | Pending | — |
+| 4. OllamaToolAgent + Ollama Model Setup | v2.0 | 0/3 | Planned | -- |
+| 5. OpenCodeAgent | v2.0 | 0/? | Pending | -- |
+| 6. CI Integration | v2.0 | 0/? | Pending | -- |
+| 7. End-to-End Validation + Comparison | v2.0 | 0/? | Pending | -- |

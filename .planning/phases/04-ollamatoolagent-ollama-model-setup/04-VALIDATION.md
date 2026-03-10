@@ -7,7 +7,7 @@ wave_0_complete: false
 created: 2026-03-10
 ---
 
-# Phase 4 — Validation Strategy
+# Phase 4 -- Validation Strategy
 
 > Per-phase validation contract for feedback sampling during execution.
 
@@ -17,18 +17,18 @@ created: 2026-03-10
 
 | Property | Value |
 |----------|-------|
-| **Framework** | vitest (project convention from Phase 3) |
-| **Config file** | `vitest.config.ts` (existing) |
-| **Quick run command** | `npx vitest run tests/ollama-smoke.test.ts` |
-| **Full suite command** | `npx vitest run tests/ollama-*.test.ts tests/permissions.test.ts tests/path-traversal.test.ts` |
+| **Framework** | ts-node standalone scripts (project convention) |
+| **Config file** | N/A (standalone scripts using assert module) |
+| **Quick run command** | `npx ts-node tests/modelfile-config.test.ts` |
+| **Full suite command** | `npx ts-node tests/permissions.test.ts && npx ts-node tests/path-traversal.test.ts && npx ts-node tests/ollama-agent.test.ts && npx ts-node tests/modelfile-config.test.ts && npx ts-node tests/cli-ollama-flag.test.ts && npx ts-node tests/smoke-gate.test.ts && npx ts-node tests/model-unload.test.ts` |
 | **Estimated runtime** | ~15 seconds (unit tests) / ~60 seconds (integration tests requiring Ollama) |
 
 ---
 
 ## Sampling Rate
 
-- **After every task commit:** Run `npx vitest run tests/ollama-smoke.test.ts`
-- **After every plan wave:** Run `npx vitest run tests/ollama-*.test.ts tests/permissions.test.ts tests/path-traversal.test.ts`
+- **After every task commit:** Run `npx ts-node tests/modelfile-config.test.ts`
+- **After every plan wave:** Run the full suite command above
 - **Before `/gsd:verify-work`:** Full suite must be green
 - **Max feedback latency:** 60 seconds
 
@@ -38,15 +38,15 @@ created: 2026-03-10
 
 | Task ID | Plan | Wave | Requirement | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|-----------|-------------------|-------------|--------|
-| 04-01-01 | 01 | 1 | OLCFG-01 | unit | `npx vitest run tests/modelfile-config.test.ts` | No -- W0 | pending |
-| 04-01-02 | 01 | 1 | OLCFG-02 | unit | `npx vitest run tests/modelfile-config.test.ts` | No -- W0 | pending |
-| 04-02-01 | 02 | 1 | AGENT-01 | integration | `npx vitest run tests/ollama-agent.test.ts` | No -- W0 | pending |
-| 04-02-02 | 02 | 1 | AGENT-01 | unit | `npx vitest run tests/permissions.test.ts` | No -- W0 | pending |
-| 04-02-03 | 02 | 1 | AGENT-01 | unit | `npx vitest run tests/path-traversal.test.ts` | No -- W0 | pending |
-| 04-03-01 | 03 | 2 | PIPE-01 | unit | `npx vitest run tests/cli-ollama-flag.test.ts` | No -- W0 | pending |
-| 04-03-02 | 03 | 2 | PIPE-03 | unit | `npx vitest run tests/smoke-gate.test.ts` | No -- W0 | pending |
-| 04-03-03 | 03 | 2 | OLCFG-03 | integration | `npx vitest run tests/model-unload.test.ts` | No -- W0 | pending |
-| 04-04-01 | 04 | 3 | AGENT-01 | e2e | `npm run eval -- superlint_demo --agent=ollama --provider=local --trials=1` | N/A | pending |
+| 04-01-01 | 01 | 1 | OLCFG-01 | unit | `npx ts-node tests/modelfile-config.test.ts` | No -- W0 | pending |
+| 04-01-02 | 01 | 1 | OLCFG-02 | unit | `npx ts-node tests/modelfile-config.test.ts` | No -- W0 | pending |
+| 04-02-01 | 02 | 2 | AGENT-01 | integration | `npx ts-node tests/ollama-agent.test.ts` | No -- W0 | pending |
+| 04-02-02 | 02 | 2 | AGENT-01 | unit | `npx ts-node tests/permissions.test.ts` | No -- W0 | pending |
+| 04-02-03 | 02 | 2 | AGENT-01 | unit | `npx ts-node tests/path-traversal.test.ts` | No -- W0 | pending |
+| 04-02-04 | 02 | 2 | PIPE-01 | unit | `npx ts-node tests/cli-ollama-flag.test.ts` | No -- W0 | pending |
+| 04-02-05 | 02 | 2 | PIPE-03 | unit | `npx ts-node tests/smoke-gate.test.ts` | No -- W0 | pending |
+| 04-02-06 | 02 | 2 | OLCFG-03 | integration | `npx ts-node tests/model-unload.test.ts` | No -- W0 | pending |
+| 04-03-01 | 03 | 3 | AGENT-01 | e2e | `npm run eval -- superlint_demo --agent=ollama --provider=local --trials=1` | N/A | pending |
 
 *Status: pending / green / red / flaky*
 
@@ -54,14 +54,13 @@ created: 2026-03-10
 
 ## Wave 0 Requirements
 
-- [ ] `tests/ollama-smoke.test.ts` -- smoke test for tool calling (requires running Ollama)
-- [ ] `tests/ollama-agent.test.ts` -- integration test for OllamaToolAgent loop (requires running Ollama)
-- [ ] `tests/permissions.test.ts` -- unit test for three-tier permission system (no Ollama needed)
-- [ ] `tests/path-traversal.test.ts` -- unit test for path-scoping defense (no Ollama needed)
-- [ ] `tests/modelfile-config.test.ts` -- unit test for Modelfile content validation
-- [ ] `tests/cli-ollama-flag.test.ts` -- unit test for --agent=ollama CLI flag
-- [ ] `tests/smoke-gate.test.ts` -- unit test for smoke test gate logic
-- [ ] `tests/model-unload.test.ts` -- integration test for model unloading (requires running Ollama)
+- [ ] `tests/modelfile-config.test.ts` -- unit test for Modelfile content validation (created by Plan 01 Task 1)
+- [ ] `tests/permissions.test.ts` -- unit test for three-tier permission system (created by Plan 01 Task 2)
+- [ ] `tests/path-traversal.test.ts` -- unit test for path-scoping defense (created by Plan 01 Task 2)
+- [ ] `tests/ollama-agent.test.ts` -- unit test for OllamaToolAgent constructability (created by Plan 02 Task 2)
+- [ ] `tests/cli-ollama-flag.test.ts` -- unit test for --agent=ollama CLI flag (created by Plan 02 Task 2)
+- [ ] `tests/smoke-gate.test.ts` -- unit test for smoke test gate logic (created by Plan 02 Task 2)
+- [ ] `tests/model-unload.test.ts` -- unit test for model unloading pattern (created by Plan 02 Task 2)
 
 ---
 

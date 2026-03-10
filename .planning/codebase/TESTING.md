@@ -1,280 +1,345 @@
 # Testing Patterns
 
-**Analysis Date:** 2026-03-08
+**Analysis Date:** 2026-03-10
 
 ## Test Framework
 
 **Runner:**
-- ts-node (no dedicated test framework like Jest or Vitest)
-- Tests run directly as Node.js scripts via ts-node
-- Configuration: `tsconfig.json` includes `tests/**/*.ts`
+- No test framework (Jest, Vitest, Mocha, etc.) is installed
+- Tests are plain TypeScript scripts executed directly with `ts-node`
+- Config: `tsconfig.json` (shared with `src/`)
+
+**Assertion Library:**
+- Hand-rolled `assert(condition, message)` helper defined in each test file
+- `assertApproxEqual(actual, expected, tolerance, message)` in `tests/ollama-grader.test.ts`
+- No `expect()` or `should` style — all assertions are imperative
 
 **Run Commands:**
 ```bash
-npm run test:bootstrap    # Run bootstrap integration tests
-npm run test:analytics    # Run analytics logic tests
-ts-node tests/bootstrap.test.ts   # Direct execution
+npm run test:bootstrap          # Integration: bootstrap + Docker + secrets
+npm run test:analytics          # Unit: analytics engine and NG calculation
+npm run test:ollama-grader      # Unit: LLMGrader with mocked fetch
+npm run test:docker-cache       # Unit: Docker content-hash naming
+npm run test:local-provider     # Integration: LocalProvider PATH augmentation
+npm run test:benchmark          # Benchmark: Ollama model performance (not a correctness test)
 ```
 
-**Assertion Library:**
-- None. Uses manual assertions and explicit success/failure logic
-- Manual validation: `if (condition) console.log('SUCCESS')` or `process.exit(1)` on failure
+Each command maps to: `ts-node tests/<name>.test.ts`
 
 ## Test File Organization
 
 **Location:**
-- Co-located in `tests/` directory parallel to `src/`
-- Pattern: `tests/<test-name>.test.ts`
-- Actual test files: `tests/bootstrap.test.ts`, `tests/analytics.test.ts`
+- All tests in top-level `tests/` directory (not co-located with source)
 
 **Naming:**
-- Suffixed with `.test.ts` (not `.spec.ts`)
-- Descriptive names: `bootstrap.test.ts` for end-to-end validation, `analytics.test.ts` for logic validation
+- `<module>.test.ts` for functional tests (e.g., `analytics.test.ts`, `bootstrap.test.ts`)
+- `<concern>.test.ts` for integration/feature-scoped tests (e.g., `docker-cache.test.ts`, `local-provider.test.ts`, `ollama-grader.test.ts`)
+- `benchmark-grader.ts` for performance benchmarking (no `.test.` suffix — not a correctness test)
 
 **Structure:**
 ```
 tests/
-├── bootstrap.test.ts     # Integration tests: single trial, multi-trial, persistence, Docker, secrets
-└── analytics.test.ts     # Unit tests: NG calculation, aggregation
+├── analytics.test.ts          # Unit: calculateNormalizedGain, AnalyticsEngine.aggregate
+├── bootstrap.test.ts          # Integration: EvalRunner with Local/Docker provider
+├── docker-cache.test.ts       # Unit: computeContextHash determinism
+├── local-provider.test.ts     # Integration: LocalProvider.runCommand PATH behavior
+├── ollama-grader.test.ts      # Unit: LLMGrader with mock fetch (most comprehensive)
+├── benchmark-grader.ts        # Benchmark: raw Ollama model throughput
+└── fixtures/
+    └── benchmark/
+        ├── session-positive.json
+        ├── session-empty.json
+        └── session-wrong.json
 ```
 
 ## Test Structure
 
-**Bootstrap Test Pattern:**
-```typescript
-async function runTest(useDocker: boolean, numTrials: number = 1, logDir?: string) {
-    console.log(`\n--- Testing with ${useDocker ? 'Docker' : 'Local'} Provider ...`);
+**Two structural patterns exist:**
 
-    // Setup
-    const provider = useDocker ? new DockerProvider() : new LocalProvider();
-    const runner = new EvalRunner(provider, logDir);
-
-    // Create agent
-    const solvingAgent = { async run(instruction, workspace, runCommand) { ... } } as BaseAgent;
-
-    // Execute
-    const report = await runner.runEval(solvingAgent, taskPath, [], numTrials);
-
-    // Assertions - explicit checks
-    if (firstLog.length === 0) {
-        console.log('FAILURE: session_log is empty!');
-        process.exit(1);
-    }
-    console.log(`Session log entries: ${firstLog.length}`);
-
-    // Report result
-    console.log(`\nSUCCESS: ...`);
-}
-
-async function main() {
-    try {
-        // Test 1
-        await runTest(false, 1);
-        // Test 2
-        await runTest(false, 3);
-        // Test N
-    } catch (e) {
-        console.error('Test failed:', e);
-        process.exit(1);
-    } finally {
-        // Cleanup
-    }
-}
-
-main();
-```
-
-**Analytics Test Pattern:**
+### Pattern 1: Sequential script with `process.exit(1)` (bootstrap, analytics)
+Used in simpler tests or integration tests where test isolation is not needed:
 ```typescript
 async function testAnalytics() {
-    // Test cases as data objects
+    // 1. Test NG Calculation
     const testCases = [
-        { input: X, expected: Y },
-        { input: A, expected: B },
+        { with: 1.0, without: 0.5, expected: 1.0 },
+        // ...
     ];
 
-    // Loop and validate
     for (const tc of testCases) {
-        const result = functionUnderTest(tc.input);
-        if (Math.abs(result - tc.expected) < 0.001) {
-            console.log(`SUCCESS: ...`);
+        const ng = calculateNormalizedGain(tc.with, tc.without);
+        if (Math.abs(ng - tc.expected) < 0.001) {
+            console.log(`SUCCESS: NG(${tc.with}, ${tc.without}) = ${ng}`);
         } else {
-            console.error(`FAILURE: ...`);
+            console.error(`FAILURE: NG(${tc.with}, ${tc.without}) = ${ng}, expected ${tc.expected}`);
             process.exit(1);
         }
-    }
-
-    // Functional validation
-    const engine = new AnalyticsEngine();
-    const stats = engine.aggregate(mockReports);
-
-    if (stats.find(s => s.task === 'task1')?.normalizedGain === 1.0) {
-        console.log('SUCCESS: Aggregation verified!');
-    } else {
-        console.error('FAILURE: Aggregation results incorrect');
-        process.exit(1);
     }
 }
 
 testAnalytics();
 ```
 
-## Test Agent Mocking
-
-**Simple Mock Agents:**
+### Pattern 2: Counter-based runner with collected failures (docker-cache, local-provider, ollama-grader)
+Used in tests with multiple independent cases where all results should be reported:
 ```typescript
-const solvingAgent = {
-    async run(instruction: string, workspace: string, runCommand: any) {
-        console.log('Solving task...');
-        await runCommand('command1');
-        await runCommand('command2');
-        return 'Solved';
-    }
-} as BaseAgent;
-```
+let passed = 0;
+let failed = 0;
 
-**Pattern:** Inline anonymous objects typed as `BaseAgent`. No mock library used.
-
-**What's Mocked:**
-- Agent implementations (test agents that execute hardcoded command sequences)
-- Test data: mock `EvalReport` arrays in analytics tests with preset pass rates
-
-**What's NOT Mocked:**
-- File system (uses real temp directories and test directories)
-- Process execution (real `spawn()` calls through LocalProvider)
-- Docker (if available, tests use real Docker; test skips gracefully if unavailable)
-- Environment providers (tests instantiate real `LocalProvider` and `DockerProvider`)
-
-## Test Coverage
-
-**Coverage Target:**
-- Not enforced; no coverage configuration found
-- Testing focuses on integration (full end-to-end pipeline) rather than unit coverage
-
-**View Coverage:**
-- No built-in coverage view
-- Tests are manual/integration focused
-
-## Test Types
-
-**Integration Tests (bootstrap.test.ts):**
-- **Scope:** Full eval pipeline from setup through report persistence
-- **Approach:**
-  - Test 1: Local provider, single trial
-  - Test 2: Local provider, multi-trial (N=3)
-  - Test 3: Local provider with log persistence (file output)
-  - Test 4: Docker provider (skips if Docker unavailable)
-  - Test 5: Secret injection and sanitization (verifies logs are redacted)
-- **Execution:** Real task workspace, real grader invocation, real report generation
-- **Verification:** Checks structure (session_log populated, grader_results present), metrics (duration > 0, n_commands > 0), rewards (pass_rate >= 0.5), and file persistence
-
-**Unit Tests (analytics.test.ts):**
-- **Scope:** Analytics logic (NG calculation, report aggregation)
-- **Approach:**
-  - Test NG function with 4 test cases (return values checked with 0.001 tolerance)
-  - Test aggregation with mock report data (verifies NG is computed correctly across task groups)
-- **Execution:** Pure function calls; no I/O
-- **Verification:** Return values match expected calculations
-
-**E2E Tests:**
-- Not explicitly separated; integration tests serve as E2E (exercise the full system)
-
-## Test Data & Fixtures
-
-**Test Task:**
-- Uses `tasks/superlint_demo/` as the standard test task
-- Real task directory with `task.toml`, `instruction.md`, test graders, and skills
-
-**Mock Data:**
-```typescript
-// From analytics.test.ts
-const mockReports: EvalReport[] = [
-    { task: 'task1', pass_rate: 0.5, pass_at_k: 0.5, pass_pow_k: 0.5, trials: [], skills_used: [] },
-    { task: 'task1', pass_rate: 1.0, pass_at_k: 1.0, pass_pow_k: 1.0, trials: [], skills_used: ['skill1'] },
-    { task: 'task2', pass_rate: 0.0, pass_at_k: 0.0, pass_pow_k: 0.0, trials: [], skills_used: [] },
-    { task: 'task2', pass_rate: 0.5, pass_at_k: 0.5, pass_pow_k: 0.5, trials: [], skills_used: ['skill1'] },
-];
-```
-
-**Fixtures Location:**
-- Test agents defined inline in test files (no factory or fixture files)
-- Test data embedded directly in test functions
-- Temporary directories created in test runtime: `path.join(__dirname, '..', 'test_logs')`, `path.join(__dirname, '..', 'secret_logs')`
-
-## Test Patterns
-
-**Async Testing:**
-```typescript
-async function main() {
+async function runTests() {
+    // Test 1: <description>
     try {
-        const report = await runner.runEval(agent, taskPath, [], numTrials);
+        const result = await someOperation();
+        assert(result.exitCode === 0, `Expected exit code 0, got ${result.exitCode}`);
+        console.log('  PASS: <description>');
+        passed++;
+    } catch (e: any) {
+        console.error(`  FAIL: <description> - ${e.message}`);
+        failed++;
+    }
 
-        if (report.pass_rate < 0.5) {
-            console.log('FAILURE: ...');
-            process.exit(1);
-        }
-    } catch (e) {
-        console.error('Test failed:', e);
+    console.log(`\nResults: ${passed} passed, ${failed} failed out of ${passed + failed}`);
+
+    if (failed > 0) {
         process.exit(1);
     }
 }
+
+runTests().catch((err) => {
+    console.error('Test runner error:', err);
+    process.exit(1);
+});
 ```
 
-**Cleanup Pattern:**
+### Pattern 3: Named `test()` helper (ollama-grader — most structured)
 ```typescript
-finally {
-    if (fs.existsSync(testLogDir)) await fs.remove(testLogDir);
-    if (fs.existsSync(secretLogDir)) await fs.remove(secretLogDir);
+let passed = 0;
+let failed = 0;
+const failures: string[] = [];
+
+async function test(name: string, fn: () => Promise<void>) {
+    const originalFetch = globalThis.fetch;
+    try {
+        await fn();
+        passed++;
+        console.log(`  [PASS] ${name}`);
+    } catch (e: any) {
+        failed++;
+        const msg = e?.message || String(e);
+        failures.push(`${name}: ${msg}`);
+        console.log(`  [FAIL] ${name}: ${msg}`);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+}
+
+// Usage:
+await test('callOllama returns GraderResult with score and reasoning when Ollama responds with valid JSON', async () => {
+    globalThis.fetch = createMockFetch([ollamaHealthOk(), ollamaTagsWithModel(), ollamaGenerateOk(0.85)]);
+    const result = await (grader as any).callOllama('test prompt', 'http://localhost:11434', config);
+    assert(result !== null, 'result should not be null');
+    assertApproxEqual(result.score, 0.85, 0.01, 'score');
+});
+```
+
+**Test naming style:**
+- Full sentence descriptions: `'callOllama returns null when fetch throws connection error (ECONNREFUSED)'`
+- Includes both the subject and expected behavior
+
+## Mocking
+
+**Framework:**
+- Manual mocking only — no sinon, jest.mock(), or similar library
+- `globalThis.fetch` is replaced directly in each test, then restored in `finally`
+
+**Fetch mocking patterns:**
+
+```typescript
+// Pattern 1: Route-based mock dispatcher (used in ollama-grader)
+interface MockRoute {
+    method: string;
+    pathPattern: string;
+    response: () => Response | Promise<Response>;
+}
+
+function createMockFetch(routes: MockRoute[], host: string = 'http://localhost:11434'): typeof globalThis.fetch {
+    return (async (input: string | URL | Request, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        const method = (init?.method || 'GET').toUpperCase();
+        for (const route of routes) {
+            if (method === route.method.toUpperCase() && url === `${host}${route.pathPattern}`) {
+                return route.response();
+            }
+        }
+        throw new Error(`Unexpected fetch: ${method} ${url}`);
+    }) as typeof globalThis.fetch;
+}
+
+// Pattern 2: Inline custom fetch (used for request body capture)
+globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    if (url.endsWith('/api/generate') && init?.method === 'POST') {
+        capturedBody = JSON.parse(init.body as string);
+        return new Response(JSON.stringify({ response: '...', done: true }), { status: 200 });
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+}) as typeof globalThis.fetch;
+```
+
+**What to Mock:**
+- `globalThis.fetch` for all HTTP calls to Ollama, Gemini, and Anthropic APIs
+- Method patching via `(instance as any).method = async (...) => { ... }` for spying on private methods
+
+**What NOT to Mock:**
+- Filesystem operations (`fs-extra`): real files/directories in `os.tmpdir()` are used
+- Child process spawning: real bash execution for `LocalProvider` tests
+- Docker daemon: `bootstrap.test.ts` skips Docker tests gracefully when Docker is unavailable (`execSync('docker ps')`)
+
+**Restoring state:**
+- `globalThis.fetch` always restored in `finally` block inside the `test()` helper
+- `process.env` API keys saved/deleted/restored in `try/finally` blocks:
+```typescript
+const savedGemini = process.env.GEMINI_API_KEY;
+delete process.env.GEMINI_API_KEY;
+try {
+    // test code
+} finally {
+    if (savedGemini) { process.env.GEMINI_API_KEY = savedGemini; }
 }
 ```
 
-## Environment & Dependencies
+## Fixtures and Factories
 
-**Environment Variables:**
-- Tests that require external APIs (Gemini, Anthropic) can use `GEMINI_API_KEY` or `ANTHROPIC_API_KEY` from process.env
-- Bootstrap test skips Docker test gracefully if Docker is unavailable: `try { execSync('docker ps', { stdio: 'ignore' }); } catch (e) { console.warn('Docker not available...'); }`
+**Test Data:**
+```typescript
+// Factory functions for grader config (ollama-grader.test.ts)
+function makeConfig(overrides: Partial<GraderConfig> = {}): GraderConfig {
+    return {
+        type: 'llm_rubric',
+        rubric: 'prompts/quality.md',
+        weight: 1.0,
+        ...overrides,
+    };
+}
 
-**Test Utilities:**
-- Standard Node.js: `child_process.execSync`, `fs-extra`, `path`
-- No test utilities library
+// Inline mock session log
+const dummySessionLog = [
+    { type: 'agent_start' as const, timestamp: new Date().toISOString(), instruction: 'Fix the code' },
+    { type: 'command' as const, timestamp: new Date().toISOString(), command: 'superlint check', stdout: 'OK', exitCode: 0 },
+    { type: 'agent_result' as const, timestamp: new Date().toISOString(), output: 'Done' },
+];
 
-## Running Tests Locally
-
-**Bootstrap Test (with verbose output):**
-```bash
-npm run test:bootstrap
-# Outputs detailed progress:
-# - Loaded config, setup provider
-# - Ran trials with timing and reward
-# - Validated session log, grader results, metrics
-# - Checked file persistence
+// Inline EvalReport mock (analytics.test.ts)
+const mockReports: EvalReport[] = [
+    { task: 'task1', pass_rate: 0.5, pass_at_k: 0.5, pass_pow_k: 0.5, trials: [], skills_used: [] },
+    { task: 'task1', pass_rate: 1.0, pass_at_k: 1.0, pass_pow_k: 1.0, trials: [], skills_used: ['skill1'] },
+];
 ```
 
-**Analytics Test:**
-```bash
-npm run test:analytics
-# Outputs NG calculations and aggregation results
-# SUCCESS/FAILURE per test case
+**Reusable route builders (ollama-grader.test.ts):**
+```typescript
+function ollamaHealthOk(): MockRoute { ... }
+function ollamaTagsWithModel(modelName: string = 'qwen2.5:3b'): MockRoute { ... }
+function ollamaTagsEmpty(): MockRoute { ... }
+function ollamaGenerateOk(score: number = 0.85, reasoning: string = 'Good work'): MockRoute { ... }
+function ollamaGenerateMalformed(): MockRoute { ... }
+function connectionRefused(): MockRoute { ... }
 ```
 
-**Exit Codes:**
-- Exit 0 on all tests passing
-- Exit 1 on any failure (via `process.exit(1)`)
+**JSON session fixtures for benchmarking:**
+- Located at `tests/fixtures/benchmark/session-positive.json`
+- Located at `tests/fixtures/benchmark/session-empty.json`
+- Located at `tests/fixtures/benchmark/session-wrong.json`
 
-## Known Test Gaps
+**Filesystem fixtures:**
+- Real task content from `tasks/superlint_demo/` used as fixture input across multiple test files
+- Temporary directories created in `os.tmpdir()` with `fs.ensureDir()` and cleaned up with `removeWithRetry()`
 
-**Not Tested:**
-- Individual grader implementations in isolation (deterministic and LLM graders tested only via integration)
-- Error paths for malformed task configs
-- Network failures in LLM graders (timeout, 5xx responses)
-- Cross-platform Windows path handling (tests likely run on Unix-like systems in CI)
-- Large-scale stress tests (many trials, many tasks in suite)
+## Coverage
 
-**Why:**
-- Focus is on end-to-end validation that the system works, not granular unit coverage
-- External APIs (Gemini, Anthropic) are integration points; mocking them would defeat the purpose
-- Task validation delegated to per-task graders and reference solutions
+**Requirements:** None enforced — no coverage tooling configured
+
+**View Coverage:**
+- Not applicable; no `--coverage` flag or coverage reporting available
+
+## Test Types
+
+**Unit Tests:**
+- `tests/analytics.test.ts` — pure function testing (`calculateNormalizedGain`, `AnalyticsEngine.aggregate`) against inline mock data
+- `tests/docker-cache.test.ts` — `computeContextHash` with real filesystem writes in `os.tmpdir()`
+- `tests/ollama-grader.test.ts` — `LLMGrader` with mocked `globalThis.fetch`; 23 named test cases
+
+**Integration Tests:**
+- `tests/bootstrap.test.ts` — full `EvalRunner` pipeline using real `LocalProvider` and real task files; optional Docker path
+- `tests/local-provider.test.ts` — `LocalProvider.runCommand` with real bash execution and temp workspaces
+
+**Performance / Manual Tests:**
+- `tests/benchmark-grader.ts` — CLI script that benchmarks Ollama models; not a correctness test; requires real Ollama instance
+
+## Common Patterns
+
+**Async Testing:**
+```typescript
+async function runTests() {
+    try {
+        const result = await provider.runCommand(workspace, 'echo "$PATH"');
+        assert(result.stdout.trim().split(':')[0].endsWith('/bin'), 'PATH check');
+        console.log('  PASS: workspace bin/ is first on PATH');
+        passed++;
+    } catch (e: any) {
+        console.error(`  FAIL: workspace bin/ is first on PATH - ${e.message}`);
+        failed++;
+    }
+}
+
+runTests().catch((err) => {
+    console.error('Test runner error:', err);
+    process.exit(1);
+});
+```
+
+**Error Testing:**
+```typescript
+await test('callOllama returns null when fetch throws connection error (ECONNREFUSED)', async () => {
+    globalThis.fetch = (async () => {
+        throw new Error('fetch failed: ECONNREFUSED');
+    }) as typeof globalThis.fetch;
+
+    const result = await (grader as any).callOllama('test prompt', 'http://localhost:11434', config);
+    assert(result === null, 'result should be null on connection error');
+});
+```
+
+**Approximate numeric assertions:**
+```typescript
+function assertApproxEqual(actual: number, expected: number, tolerance: number, message: string) {
+    if (Math.abs(actual - expected) > tolerance) {
+        throw new Error(`${message}: expected ~${expected}, got ${actual}`);
+    }
+}
+
+assertApproxEqual(result.score, 0.85, 0.01, 'score');
+```
+
+**Testing private methods:**
+- Access via `(instance as any).privateMethod()` cast — no reflection utilities
+- Example: `await (grader as any).callOllama('test prompt', host, config)`
+
+**Cleanup with retry (Windows file-lock resilience):**
+```typescript
+async function removeWithRetry(dir: string, retries = 5, delayMs = 200): Promise<void> {
+    for (let i = 0; i < retries; i++) {
+        try {
+            await fs.remove(dir);
+            return;
+        } catch (err: any) {
+            if (i === retries - 1) throw err;
+            await new Promise(resolve => setTimeout(resolve, delayMs));
+        }
+    }
+}
+```
 
 ---
 
-*Testing analysis: 2026-03-08*
+*Testing analysis: 2026-03-10*

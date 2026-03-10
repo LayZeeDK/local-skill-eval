@@ -1,171 +1,174 @@
 # Architecture
 
-**Analysis Date:** 2026-03-08
+**Analysis Date:** 2026-03-10
 
 ## Pattern Overview
 
-**Overall:** Modular evaluation pipeline with pluggable agents, environments, and graders.
+**Overall:** Plugin-based evaluation pipeline with provider/agent/grader abstractions
 
 **Key Characteristics:**
-- Abstraction-based design around `BaseAgent` and `EnvironmentProvider` interfaces
-- Separation of concerns: CLI orchestration → eval execution → grading → reporting
-- Support for multiple LLM agents (Gemini, Claude) and execution environments (Docker, local)
-- Task-driven configuration via TOML (task structure, graders, metadata, resource limits)
+- Interface-driven extensibility: `BaseAgent` (abstract class), `EnvironmentProvider` (interface), `Grader` (interface) are all independently swappable
+- Three-phase lifecycle per eval run: one-time `prepare` → per-trial `setup`/`cleanup` → one-time `teardown`
+- Functional core: pure data types in `src/types.ts`; side-effecting orchestration in `src/evalRunner.ts`
+- No external framework — plain Node.js with `ts-node` for execution
 
 ## Layers
 
-**CLI Layer:**
-- Purpose: Parse arguments, manage environment variables, coordinate task selection, handle validation flow
+**CLI Entry Point:**
+- Purpose: Parse CLI arguments, load env files, dispatch to `EvalRunner`
 - Location: `src/cli.ts`
-- Contains: CLI parser, environment loader, task discovery, suite loading
-- Depends on: EvalRunner, providers, agents
-- Used by: User executing `npm run eval`
+- Contains: Argument parsing, `.env` loading, task/suite resolution, result printing
+- Depends on: `EvalRunner`, `DockerProvider`, `LocalProvider`, `GeminiAgent`, `ClaudeAgent`
+- Used by: `npm run eval`, `npm run validate`
 
-**Orchestration Layer:**
-- Purpose: Run multiple trials, parallelize execution, aggregate results, sanitize outputs
+**Eval Runner (Orchestrator):**
+- Purpose: Execute one or more trials of a task, aggregate results, save reports
 - Location: `src/evalRunner.ts`
-- Contains: EvalRunner (main orchestrator), trial runner, reward calculator, session logging, secret redaction
-- Depends on: Agents, providers, graders, types
-- Used by: CLI, tests
+- Contains: `EvalRunner` class, `loadTaskConfig`, `withTimeout`, `calculatePassAtK`, `calculatePassPowK`, secret sanitization, report persistence
+- Depends on: `EnvironmentProvider`, `BaseAgent`, graders, `src/types.ts`
+- Used by: `src/cli.ts`, test files
 
-**Agent Layer:**
-- Purpose: Wrap LLM CLIs (Gemini, Claude) with normalized interface, handle instruction encoding
-- Location: `src/agents/gemini.ts`, `src/agents/claude.ts`
-- Contains: Agent implementations extending BaseAgent, base64 instruction encoding
-- Depends on: BaseAgent interface, environment provider for command execution
-- Used by: EvalRunner
-
-**Environment Provider Layer:**
-- Purpose: Isolate task execution (Docker container or local temp directory), manage workspace lifecycle
+**Environment Providers:**
+- Purpose: Manage isolated workspaces where the agent runs — either Docker containers or local temp dirs
 - Location: `src/providers/docker.ts`, `src/providers/local.ts`
-- Contains: Docker provider (image build, skill injection, container management), local provider (temp dir setup)
-- Depends on: Dockerode SDK, Node.js fs, types
-- Used by: EvalRunner, agents (via runCommand callback)
+- Contains: Implements `EnvironmentProvider` interface — `prepare`, `setup`, `cleanup`, `teardown`, `runCommand`, `diagnose`
+- Depends on: `dockerode`, `fs-extra`, `tar-stream`, Node.js `child_process`
+- Used by: `EvalRunner`
 
-**Grading Layer:**
-- Purpose: Score agent performance deterministically or via LLM rubrics
+**Agents:**
+- Purpose: Run the AI agent CLI inside the workspace and return its output
+- Location: `src/agents/gemini.ts`, `src/agents/claude.ts`
+- Contains: Extends `BaseAgent` abstract class, implements `run(instruction, workspacePath, runCommand)`
+- Depends on: `src/types.ts`
+- Used by: `EvalRunner` via `BaseAgent` interface
+
+**Graders:**
+- Purpose: Score the agent's work after it finishes — either deterministically or via LLM
 - Location: `src/graders/index.ts`
-- Contains: Grader interface, DeterministicGrader (shell scripts + optional float score), LLMGrader (Gemini/Anthropic API)
-- Depends on: Fetch API, types
-- Used by: EvalRunner per-trial
+- Contains: `DeterministicGrader`, `LLMGrader`, `getGrader` factory function, `Grader` interface
+- Depends on: `src/types.ts`, Ollama/Gemini/Anthropic HTTP APIs
+- Used by: `EvalRunner` per-trial, after agent completion
 
-**Reporting & Analytics Layer:**
-- Purpose: Visualize results and compute statistics
-- Location: `src/reporters/cli.ts`, `src/reporters/browser.ts`, `src/analytics/engine.ts`
-- Contains: CLI renderer (ANSI tables/bars), browser UI, analytics aggregator (normalized gain calculation)
-- Depends on: File system, types
-- Used by: `npm run preview` and `npm run analyze`
+**Analytics:**
+- Purpose: Compute Normalized Gain and aggregate statistics across multiple eval reports
+- Location: `src/analytics/engine.ts`, `src/analytics/analyze.ts`
+- Contains: `AnalyticsEngine`, `calculateNormalizedGain`, `AggregateStats`
+- Depends on: `src/types.ts`, `fs-extra`
+- Used by: `npm run analyze` via `src/analytics/analyze.ts`
 
-**Type System:**
+**Reporters:**
+- Purpose: Display eval results to the user (CLI pretty-print or browser web UI)
+- Location: `src/reporters/cli.ts`, `src/reporters/browser.ts`
+- Contains: ANSI-colored terminal output, minimal HTTP server serving `src/viewer.html`
+- Depends on: `fs-extra`, Node.js `http`
+- Used by: `src/preview.ts`
+
+**Shared Types:**
+- Purpose: Define the data model shared across all layers
 - Location: `src/types.ts`
-- Contains: Interfaces for all major concepts (BaseAgent, EnvironmentProvider, TaskConfig, TrialResult, EvalReport, etc.)
+- Contains: `CommandResult`, `TaskConfig`, `GraderConfig`, `GraderResult`, `LogEntry`, `TrialResult`, `EvalReport`, `BaseAgent` (abstract class), `EnvironmentProvider` (interface)
+- Depends on: Nothing
+- Used by: All other modules
 
 ## Data Flow
 
-**Evaluation Flow:**
+**Normal Eval Run:**
 
-1. **CLI Input** → Parse flags, load env files (root + task-level)
-2. **Task Discovery** → Find task by name or load suite, read instruction.md and task.toml
-3. **Environment Prepare** → Docker: build image, inject skills once; Local: N/A
-4. **Per-Trial Execution:**
-   - Environment setup (Docker: create container; Local: copy task to temp dir, inject skills)
-   - Agent run: passes instruction, workspace path, runCommand callback
-   - Agent executes commands via provider.runCommand()
-   - Graders score the workspace state (deterministic and/or LLM rubric)
-   - Session logged: instruction, commands, outputs, grader results, reward
-5. **Metric Calculation** → pass_rate, pass@k, pass^k from trial rewards
-6. **Sanitization** → Redact API keys from logs
-7. **Persistence** → Save EvalReport JSON to `results/` directory
-8. **Environment Teardown** → Docker: remove image; Local: cleanup already done per-trial
+1. `src/cli.ts` parses CLI args, loads root `.env` and task `.env`, resolves task directory
+2. `cli.ts` auto-discovers skills in `tasks/<name>/skills/` and builds `skillsPaths[]`
+3. `cli.ts` constructs a provider (`DockerProvider` or `LocalProvider`) and an agent (`GeminiAgent` or `ClaudeAgent`)
+4. `EvalRunner.runEval()` calls `provider.prepare()` once — Docker builds image, injects skills; Local is a no-op
+5. For each trial: `provider.setup()` creates an isolated workspace (Docker container ID or temp dir path)
+6. `EvalRunner` reads `tasks/<name>/instruction.md` and passes it to `agent.run()` with a `loggedRunCommand` callback
+7. Agent invokes the real CLI tool (gemini/claude) inside the workspace via `provider.runCommand()`; each command is logged to `session_log`
+8. After the agent completes, each grader from `task.toml` runs: `DeterministicGrader` executes a shell command; `LLMGrader` sends the session transcript to Ollama/Gemini/Anthropic
+9. Weighted reward is calculated: `sum(score * weight) / sum(weight)`
+10. `provider.cleanup()` removes the container or temp dir
+11. After all trials: `provider.teardown()` clears image reference; report saved as `results/<task>_<timestamp>.json` with secrets redacted
+
+**Validation Mode (`--validate`):**
+
+1. Same setup, but the agent is replaced with an inline shim that runs `bash solution/solve.sh`
+2. Runs 1 trial; prints grader results; exits non-zero if `reward < 0.5`
+
+**Analytics Flow:**
+
+1. `src/analytics/analyze.ts` reads all `*.json` files from `results/`
+2. `AnalyticsEngine.aggregate()` groups reports by task name, splits into with-skill vs without-skill buckets
+3. Computes `normalizedGain = (passRateWithSkill - passRateNoSkill) / (1 - passRateNoSkill)`
 
 **State Management:**
-- Ephemeral: Trial-by-trial workspace isolation (containers or temp dirs)
-- Persistent: Session logs and eval reports saved to `results/`
-- Stateless agents: No memory between trials (each trial gets fresh workspace)
+- No in-memory global state across runs
+- `DockerProvider` holds `preparedImage` string as instance state during a single eval run
+- All persistent state lives in `results/*.json` (append-only log)
 
 ## Key Abstractions
 
-**BaseAgent:**
-- Purpose: Represents an LLM agent that receives instructions and executes commands
+**BaseAgent (`src/types.ts`):**
+- Purpose: Contract for any AI agent CLI harness
 - Examples: `src/agents/gemini.ts`, `src/agents/claude.ts`
-- Pattern: Encode instruction to base64 (avoid shell escaping), invoke agent CLI with file redirection, capture stdout/stderr
+- Pattern: Abstract class with single `run(instruction, workspacePath, runCommand)` method; receives a `runCommand` callback so commands are logged transparently
 
-**EnvironmentProvider:**
-- Purpose: Abstracts workspace creation, command execution, and cleanup
-- Examples: `src/providers/docker.ts` (containerized), `src/providers/local.ts` (filesystem)
-- Pattern: Prepare (one-time setup), setup (per-trial), cleanup (per-trial), teardown (one-time), runCommand (execute in workspace)
+**EnvironmentProvider (`src/types.ts`):**
+- Purpose: Isolate the filesystem/process environment that the agent operates in
+- Examples: `src/providers/docker.ts`, `src/providers/local.ts`
+- Pattern: Two-phase lifecycle — `prepare`/`teardown` (one-time) and `setup`/`cleanup` (per-trial); `runCommand` executes shell commands inside the workspace
 
-**Grader:**
-- Purpose: Score a completed trial
-- Examples: DeterministicGrader, LLMGrader
-- Pattern: Inspect workspace state + session log, return GraderResult (score 0.0–1.0, type, details)
+**Grader (`src/graders/index.ts`):**
+- Purpose: Score a completed agent session on a 0.0–1.0 scale
+- Examples: `DeterministicGrader` (shell exit code + optional `reward.txt`), `LLMGrader` (Ollama → Gemini → Anthropic fallback chain)
+- Pattern: `grade(workspace, provider, config, taskPath, sessionLog, env)` returns a `GraderResult`
 
-**TaskConfig:**
-- Purpose: Represent task.toml structure with metadata, resource limits, grader definitions
-- Pattern: Loaded once per task, shared across trials
+**TaskConfig (`src/types.ts`):**
+- Purpose: Typed representation of `task.toml`; defines graders, timeouts, resource limits
+- Pattern: Loaded by `loadTaskConfig()` in `src/evalRunner.ts`; supports both `[[graders]]` format and legacy `[verifier]` format
 
-**EvalReport:**
-- Purpose: Complete result of all trials, including metrics, grader breakdowns, session logs
-- Pattern: Saved to JSON, used by reporters and analytics
+**EvalReport (`src/types.ts`):**
+- Purpose: Serializable output of an entire eval run (all trials, metrics, session logs)
+- Pattern: Written to `results/<task>_<timestamp>.json`; loaded by analytics and reporters
 
 ## Entry Points
 
-**CLI Entry:**
-- Location: `src/cli.ts` (line 41–234)
-- Triggers: `npm run eval <task> [options]`
-- Responsibilities: Parse args, load env, discover tasks, run EvalRunner, display results
+**Main Eval CLI:**
+- Location: `src/cli.ts`
+- Triggers: `npm run eval`, `ts-node src/cli.ts`
+- Responsibilities: Full eval orchestration — provider selection, skill discovery, env loading, trial execution, result display
 
-**Validation Entry:**
-- Location: `src/cli.ts` (line 153–184)
-- Triggers: `npm run eval <task> --validate`
-- Responsibilities: Load reference solution, run single trial with solve.sh, verify graders pass
-
-**Bootstrap Test:**
-- Location: `tests/bootstrap.test.ts`
-- Triggers: `npm run test:bootstrap`
-- Responsibilities: Verify infrastructure (Docker/Local) without API keys
-
-**Analytics Entry:**
+**Analytics CLI:**
 - Location: `src/analytics/analyze.ts`
-- Triggers: `npm run analyze -- --logDir=./results`
-- Responsibilities: Load all reports, aggregate by task, compute normalized gain, display stats
+- Triggers: `npm run analyze`
+- Responsibilities: Load all result JSON files, compute normalized gain, print summary table
 
-**Preview Entries:**
+**Preview CLI:**
 - Location: `src/preview.ts`
-- Triggers: `npm run preview` (CLI) or `npm run viewer` (browser)
-- Responsibilities: Load reports, render CLI or web UI
+- Triggers: `npm run preview`, `npm run viewer`
+- Responsibilities: Route to CLI reporter or browser HTTP server based on first argument
+
+**Test Runner Scripts:**
+- Location: `tests/*.test.ts`, `tests/benchmark-grader.ts`
+- Triggers: `npm run test:*` scripts
+- Responsibilities: Self-contained integration/unit test scripts (no Jest/Vitest; use `process.exit(1)` on failure)
 
 ## Error Handling
 
-**Strategy:** Timeout-based failures, try-catch with diagnostics, per-trial isolation.
+**Strategy:** Errors propagate up to the caller; `EvalRunner.runSingleTrial` catches all errors and returns `reward: 0` with the error message in the session log; `cli.ts` catches top-level errors and calls `process.exit(1)`
 
 **Patterns:**
-- Agent timeout: `withTimeout()` wraps agent.run() with configurable timeout from task.toml
-- Provider errors: Caught in runSingleTrial try-catch, trial marked as reward=0 with error in session log
-- Grader errors: Caught and returned as GraderResult with score=0, details=error message
-- Diagnostics: Docker provider captures process list, open files, memory, disk (for debugging)
-- Cleanup isolation: finally block in runSingleTrial ensures workspace cleanup even if trial fails
+- Trial-level catch: any error in `runSingleTrial` produces a zero-reward trial, not a thrown exception, so other trials continue
+- Provider diagnose: `DockerProvider.diagnose()` collects container state (ps, memory, disk) when a trial fails — useful for debugging Docker hangs
+- LLM grader fallback: Ollama → Gemini → Anthropic; returns a zero-score `GraderResult` with an error message if all fail
+- Timeout wrapper: `withTimeout()` rejects after `taskConfig.agent.timeout_sec` seconds
 
 ## Cross-Cutting Concerns
 
-**Logging:**
-- Session log: Per-trial, records agent_start, command, agent_result, grader, reward events with timestamps
-- No external logger; all captured in memory then persisted as EvalReport.trials[].session_log
+**Secret Redaction:** `EvalRunner.sanitize()` replaces all env var values (≥6 chars) with `[REDACTED]` in `session_log` before writing to disk; applied in `saveReport()`
 
-**Validation:**
-- Task TOML: Parsed once, checked for required fields (metadata, graders, agent, environment)
-- Grader config: type must be 'deterministic' or 'llm_rubric', weight must be present
+**Skill Injection:** Both providers copy skill directories into `.agents/skills/` (Gemini) and `.claude/skills/` (Claude) inside the workspace; this is handled in `provider.setup()` (LocalProvider) and `provider.prepare()` (DockerProvider via container commit)
 
-**Authentication:**
-- API keys: Loaded from root .env and process.env, stored in baseEnv
-- Passed to provider and graders via env parameter
-- Automatically redacted from persisted logs (any value >5 chars is replaced with [REDACTED])
+**Content Hashing:** `DockerProvider` computes a SHA-256 content hash of the task directory and skills to produce deterministic Docker image names; cache hit avoids rebuild (`src/providers/docker.ts` → `computeContextHash`)
 
-**Skill Injection:**
-- Docker: Tar-packed skill directories injected into container at prepare time
-- Local: Skill directories copied to `.agents/skills/` and `.claude/skills/` per-trial
-- Auto-discovery paths: `/workspace/.agents/skills` and `/workspace/.claude/skills` (Docker standard)
+**Logging:** `console.log`/`console.warn`/`console.error` throughout; no structured logging framework; all agent session events written to `session_log: LogEntry[]` in the report JSON
 
 ---
 
-*Architecture analysis: 2026-03-08*
+*Architecture analysis: 2026-03-10*

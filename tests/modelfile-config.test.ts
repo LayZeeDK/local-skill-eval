@@ -17,7 +17,7 @@ function main() {
     }
 
     // Read Modelfile content
-    const modelfilePath = path.join(__dirname, '..', 'modelfiles', 'qwen3-agent.Modelfile');
+    const modelfilePath = path.join(__dirname, '..', 'modelfiles', 'qwen3-skill-eval-agent.Modelfile');
     const content = fs.readFileSync(modelfilePath, 'utf-8');
 
     // Modelfile content assertions
@@ -34,8 +34,8 @@ function main() {
         'types.ts exports DEFAULT_OLLAMA_AGENT_CONFIG object'
     );
     assert(
-        types.DEFAULT_OLLAMA_AGENT_CONFIG.model === 'qwen3-agent',
-        'OllamaAgentConfig default model is qwen3-agent'
+        types.DEFAULT_OLLAMA_AGENT_CONFIG.model === 'qwen3-skill-eval-agent',
+        'OllamaAgentConfig default model is qwen3-skill-eval-agent'
     );
     assert(
         types.DEFAULT_OLLAMA_AGENT_CONFIG.host === 'http://localhost:11434',

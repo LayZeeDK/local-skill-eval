@@ -189,7 +189,7 @@ async function main() {
 
             // Smoke test gate for Ollama agent
             if (agentType === 'ollama') {
-                const smokeResult = await smokeTestToolCalling('http://localhost:11434', 'qwen3-agent');
+                const smokeResult = await smokeTestToolCalling('http://localhost:11434', 'qwen3-skill-eval-agent');
 
                 if (!smokeResult.passed) {
                     console.error(`[ERROR] Ollama smoke test failed: ${smokeResult.error}`);

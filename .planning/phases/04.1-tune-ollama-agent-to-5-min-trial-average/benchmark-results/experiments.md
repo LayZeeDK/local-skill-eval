@@ -15,6 +15,7 @@
 | max-iter-15 | 313.3 | 43.6 | 0.98 | 5.0 | REJECT |
 | batch-1024 | 215.6 | 8.2 | 0.99 | 4.0 | KEEP |
 | tool-output-4000 | 274.0 | 29.0 | 0.98 | 4.7 | REJECT |
+| flash-attn | 268.4 | 32.4 | 0.98 | 4.7 | REJECT |
 
 ## Experiment 1: Temperature 0.25
 
@@ -122,3 +123,18 @@ Rules:
 - **Don't reduce generation budget:** num_predict 2048 and maxToolOutputChars 4000 both caused more commands and slower runs. The agent needs room to generate complete tool calls and see full tool output.
 - **System prompt changes are neutral:** The structured prompt didn't help. The baseline 3-line prompt is already concise enough.
 - **maxIterations is irrelevant:** The agent completes in 4-6 turns regardless of the cap.
+- **Flash attention + q8_0 KV cache hurt on ARM64 CPU:** No GPU to leverage flash attention; q8_0 quantized KV cache likely degrades quality enough to cause extra commands.
+
+## Experiment 7: Flash Attention + q8_0 KV Cache
+
+**Changed:** Ollama env vars `OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q8_0`
+**Rationale:** Flash attention reduces memory bandwidth for KV cache access; q8_0 quantizes KV cache to 8-bit, reducing memory footprint and potentially speeding up prompt eval.
+
+| Trial | Duration (s) | Reward | Commands |
+|-------|-------------|--------|----------|
+| 1 | 279.2 | 0.97 | 5 |
+| 2 | 231.9 | 1.00 | 4 |
+| 3 | 294.0 | 0.97 | 5 |
+| **Avg** | **268.4** | **0.98** | **4.7** |
+
+**Verdict: REJECT** -- 14% slower with high variance. Flash attention provides no benefit on ARM64 CPU-only (no GPU to accelerate). The q8_0 KV cache quantization likely introduces enough precision loss to cause extra commands.

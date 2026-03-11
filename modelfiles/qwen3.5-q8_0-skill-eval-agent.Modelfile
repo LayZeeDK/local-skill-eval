@@ -1,4 +1,4 @@
-FROM qwen3:4b
+FROM qwen3.5:4b-q8_0
 PARAMETER num_ctx 4096
 PARAMETER num_predict 4096
 PARAMETER temperature 0

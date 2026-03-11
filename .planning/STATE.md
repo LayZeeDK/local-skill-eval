@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: opencode + Ollama Agent Backends
 status: completed
-stopped_at: Phase 5 context gathered
-last_updated: "2026-03-11T12:19:35.714Z"
-last_activity: 2026-03-11 -- Phase 4.1 complete, ready for Phase 5 (OpenCodeAgent)
+stopped_at: Completed 05-01-PLAN.md
+last_updated: "2026-03-11T17:40:04.096Z"
+last_activity: 2026-03-11 -- Phase 5 Plan 01 complete (OpenCodeAgent core)
 progress:
   total_phases: 5
   completed_phases: 2
-  total_plans: 6
-  completed_plans: 6
+  total_plans: 9
+  completed_plans: 7
 ---
 
 # Project State
@@ -24,10 +24,10 @@ See: .planning/PROJECT.md (updated 2026-03-10)
 
 ## Current Position
 
-Phase: Phase 4.1 (Tune Ollama Agent to 5 Min Trial Average) -- COMPLETE
-Plan: 3 of 3 complete
-Status: All plans complete. Agent switched to qwen2.5:3b (53s avg, 1.00 reward, 3 cmds).
-Last activity: 2026-03-11 -- Phase 4.1 complete, ready for Phase 5 (OpenCodeAgent)
+Phase: Phase 5 (OpenCodeAgent)
+Plan: 1 of 3 complete
+Status: Plan 01 complete -- OpenCodeAgent class, config template, and 13 unit tests.
+Last activity: 2026-03-11 -- Phase 5 Plan 01 complete (OpenCodeAgent core)
 
 ## Accumulated Context
 
@@ -57,6 +57,9 @@ Decisions logged in PROJECT.md Key Decisions table. v1.0 decisions archived to m
 - [Phase 04.1]: qwen3.5:4b-q8_0 is the documented alternative for harder tasks (167s avg, 0.97 reward)
 - [Phase 04.1]: /no_think kept in system prompt -- qwen2.5 recognizes it, boosts reward from 0.97 to 1.00
 - [Phase 04.1]: Model size not correlated with agent quality -- 3B beat all larger models
+- [Phase 05]: Static config copied as-is to workspace; Docker baseURL adjustment deferred to Plan 03
+- [Phase 05]: Bash timeout command as primary hang protection; fallback to no-timeout when timeout binary unavailable
+- [Phase 05]: @types/tree-kill not available on npm; tree-kill ships its own .d.ts types
 
 ### Pending Todos
 
@@ -77,9 +80,10 @@ None.
 | 04.1 | 01 | 57min | 2 | 9 |
 | 04.1 | 02 | ~120min | 4 | 8 |
 | 04.1 | 03 | ~180min | 4 | 12 |
+| Phase 05 P01 | 2min | 2 tasks | 5 files |
 
 ## Session Continuity
 
-Last session: 2026-03-11T12:19:35.711Z
-Stopped at: Phase 5 context gathered
-Resume file: .planning/phases/05-opencodeagent/05-CONTEXT.md
+Last session: 2026-03-11T17:40:04.094Z
+Stopped at: Completed 05-01-PLAN.md
+Resume file: None

@@ -10,7 +10,7 @@ Requirements for v2.0 milestone. Each maps to roadmap phases.
 ### Agent Backends
 
 - [x] **AGENT-01**: OllamaToolAgent executes tasks via direct Ollama API with tool calling (read_file, write_file, bash, list_directory)
-- [ ] **AGENT-02**: OpenCodeAgent executes tasks via opencode CLI backed by Ollama
+- [x] **AGENT-02**: OpenCodeAgent executes tasks via opencode CLI backed by Ollama
 - [ ] **AGENT-03**: Both agents can run the superlint_demo task end-to-end and produce a scored result
 - [ ] **AGENT-04**: Each trial completes within 15 minutes on target hardware (local and CI)
 
@@ -25,7 +25,7 @@ Requirements for v2.0 milestone. Each maps to roadmap phases.
 - [x] **PIPE-01**: `--agent=ollama` CLI flag selects OllamaToolAgent as the agent backend
 - [ ] **PIPE-02**: `--agent=opencode` CLI flag selects OpenCodeAgent as the agent backend
 - [x] **PIPE-03**: Tool-calling smoke test gates evaluation -- catches misconfigured models before starting a trial
-- [ ] **PIPE-04**: OpenCodeAgent injects opencode.json config (Ollama provider, permissions, model) into workspace
+- [x] **PIPE-04**: OpenCodeAgent injects opencode.json config (Ollama provider, permissions, model) into workspace
 
 ### CI Integration
 
@@ -74,7 +74,7 @@ Tracked but not in current roadmap.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | AGENT-01 | Phase 4 | Complete |
-| AGENT-02 | Phase 5 | Pending |
+| AGENT-02 | Phase 5 | Complete |
 | AGENT-03 | Phase 7 | Pending |
 | AGENT-04 | Phase 7 | Pending |
 | OLCFG-01 | Phase 4 | Complete |
@@ -83,7 +83,7 @@ Tracked but not in current roadmap.
 | PIPE-01 | Phase 4 | Complete |
 | PIPE-02 | Phase 5 | Pending |
 | PIPE-03 | Phase 4 | Complete |
-| PIPE-04 | Phase 5 | Pending |
+| PIPE-04 | Phase 5 | Complete |
 | CI-01 | Phase 6 | Pending |
 | CI-02 | Phase 6 | Pending |
 | CI-03 | Phase 6 | Pending |

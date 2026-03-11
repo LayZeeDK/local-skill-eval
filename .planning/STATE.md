@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: opencode + Ollama Agent Backends
-status: verifying
-stopped_at: Phase 4.1 context gathered
-last_updated: "2026-03-10T20:38:29.521Z"
-last_activity: 2026-03-10 -- E2E validation passed (superlint_demo 0.97 reward with OllamaToolAgent)
+status: executing
+stopped_at: Completed 04.1-01-PLAN.md
+last_updated: "2026-03-11T00:30:00Z"
+last_activity: 2026-03-11 -- Baseline benchmark captured (qwen3.5:4b avg 235s, target met)
 progress:
   total_phases: 5
   completed_phases: 1
@@ -24,10 +24,10 @@ See: .planning/PROJECT.md (updated 2026-03-10)
 
 ## Current Position
 
-Phase: Phase 4 (OllamaToolAgent + Ollama Model Setup) -- COMPLETE
-Plan: 3 of 3 (all done)
-Status: Phase 4 complete, all 3 plans executed and verified
-Last activity: 2026-03-10 -- E2E validation passed (superlint_demo 0.97 reward with OllamaToolAgent)
+Phase: Phase 4.1 (Tune Ollama Agent to 5 Min Trial Average)
+Plan: 1 of 3 complete
+Status: Plan 01 (benchmark tooling + baseline) complete, plans 02-03 remaining
+Last activity: 2026-03-11 -- Baseline benchmark captured (qwen3.5:4b avg 235s, target met)
 
 ## Accumulated Context
 
@@ -46,6 +46,9 @@ Decisions logged in PROJECT.md Key Decisions table. v1.0 decisions archived to m
 - [Phase 04]: num_ctx 4096 sufficient for eval tasks, num_predict 4096 required (lower truncates tool calls)
 - [Phase 04]: /no_think + directive system prompt reduces Qwen3 thinking token waste
 - [Phase 04]: Smart model unloading -- unload non-agent models only, keep agent warm
+- [Phase 04.1]: qwen3.5:4b already meets 300s target (235s avg) -- remaining plans focus on further optimization
+- [Phase 04.1]: Benchmark runner uses per-trial execSync calls to avoid timeout on multi-trial runs
+- [Phase 04.1]: Prompt eval is 70% of Ollama time -- primary optimization target
 
 ### Pending Todos
 
@@ -59,8 +62,14 @@ None.
 
 - opencode linux-arm64 SIGABRT (issue #13367) -- verify in Phase 6, fallback to x64 runner
 
+## Performance Metrics
+
+| Phase | Plan | Duration | Tasks | Files |
+|-------|------|----------|-------|-------|
+| 04.1 | 01 | 57min | 2 | 9 |
+
 ## Session Continuity
 
-Last session: 2026-03-10T20:38:29.519Z
-Stopped at: Phase 4.1 context gathered
-Resume file: .planning/phases/04.1-tune-ollama-agent-to-5-min-trial-average/04.1-CONTEXT.md
+Last session: 2026-03-11T00:30:00Z
+Stopped at: Completed 04.1-01-PLAN.md
+Resume file: .planning/phases/04.1-tune-ollama-agent-to-5-min-trial-average/04.1-01-SUMMARY.md

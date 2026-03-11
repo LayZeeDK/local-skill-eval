@@ -23,7 +23,7 @@ Requirements for v2.0 milestone. Each maps to roadmap phases.
 ### Eval Pipeline
 
 - [x] **PIPE-01**: `--agent=ollama` CLI flag selects OllamaToolAgent as the agent backend
-- [ ] **PIPE-02**: `--agent=opencode` CLI flag selects OpenCodeAgent as the agent backend
+- [x] **PIPE-02**: `--agent=opencode` CLI flag selects OpenCodeAgent as the agent backend
 - [x] **PIPE-03**: Tool-calling smoke test gates evaluation -- catches misconfigured models before starting a trial
 - [x] **PIPE-04**: OpenCodeAgent injects opencode.json config (Ollama provider, permissions, model) into workspace
 
@@ -81,7 +81,7 @@ Tracked but not in current roadmap.
 | OLCFG-02 | Phase 4 | Complete |
 | OLCFG-03 | Phase 4 | Complete |
 | PIPE-01 | Phase 4 | Complete |
-| PIPE-02 | Phase 5 | Pending |
+| PIPE-02 | Phase 5 | Complete |
 | PIPE-03 | Phase 4 | Complete |
 | PIPE-04 | Phase 5 | Complete |
 | CI-01 | Phase 6 | Pending |

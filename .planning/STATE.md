@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: opencode + Ollama Agent Backends
 status: completed
-stopped_at: Completed 05-01-PLAN.md
-last_updated: "2026-03-11T17:40:04.096Z"
-last_activity: 2026-03-11 -- Phase 5 Plan 01 complete (OpenCodeAgent core)
+stopped_at: Completed 05-02-PLAN.md
+last_updated: "2026-03-11T17:45:09.714Z"
+last_activity: 2026-03-11 -- Phase 5 Plan 02 complete (CLI wiring for OpenCodeAgent)
 progress:
   total_phases: 5
   completed_phases: 2
   total_plans: 9
-  completed_plans: 7
+  completed_plans: 8
 ---
 
 # Project State
@@ -25,9 +25,9 @@ See: .planning/PROJECT.md (updated 2026-03-10)
 ## Current Position
 
 Phase: Phase 5 (OpenCodeAgent)
-Plan: 1 of 3 complete
-Status: Plan 01 complete -- OpenCodeAgent class, config template, and 13 unit tests.
-Last activity: 2026-03-11 -- Phase 5 Plan 01 complete (OpenCodeAgent core)
+Plan: 2 of 3 complete
+Status: Plan 02 complete -- CLI wiring with --agent=opencode flag, smoke test, and 7 tests.
+Last activity: 2026-03-11 -- Phase 5 Plan 02 complete (CLI wiring for OpenCodeAgent)
 
 ## Accumulated Context
 
@@ -60,6 +60,8 @@ Decisions logged in PROJECT.md Key Decisions table. v1.0 decisions archived to m
 - [Phase 05]: Static config copied as-is to workspace; Docker baseURL adjustment deferred to Plan 03
 - [Phase 05]: Bash timeout command as primary hang protection; fallback to no-timeout when timeout binary unavailable
 - [Phase 05]: @types/tree-kill not available on npm; tree-kill ships its own .d.ts types
+- [Phase 05]: Opencode smoke test uses Ollama client.list() instead of opencode --version since runCommand is unavailable at CLI setup time
+- [Phase 05]: Model unload pattern duplicated from ollama block rather than extracting shared function to minimize risk
 
 ### Pending Todos
 
@@ -81,9 +83,10 @@ None.
 | 04.1 | 02 | ~120min | 4 | 8 |
 | 04.1 | 03 | ~180min | 4 | 12 |
 | Phase 05 P01 | 2min | 2 tasks | 5 files |
+| 05 | 02 | 2min | 2 | 3 |
 
 ## Session Continuity
 
-Last session: 2026-03-11T17:40:04.094Z
-Stopped at: Completed 05-01-PLAN.md
+Last session: 2026-03-11T17:44:01Z
+Stopped at: Completed 05-02-PLAN.md
 Resume file: None

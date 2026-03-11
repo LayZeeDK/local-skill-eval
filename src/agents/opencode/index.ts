@@ -4,14 +4,13 @@ import * as path from 'path';
 import * as fs from 'fs';
 
 /**
- * Model name used by opencode. Uses qwen3.5:4b because opencode's tool-calling
- * protocol (OpenAI-compatible /v1 API with 10+ tools) requires strong structured
- * tool call formatting. Qwen 2.5 (3B and 7B) both failed -- 3B invoked wrong
- * tools with malformed args, 7B produced zero tool calls. Qwen 3.5 has
- * significantly better tool-calling training data.
+ * Model name used by opencode. Uses qwen3:4b because Qwen 3.5 has broken tool
+ * calling on Ollama (issues #14493, #14745) -- tool calls are printed as text
+ * instead of being executed. Qwen3 uses the stable Hermes-style tool calling
+ * format that Ollama supports reliably.
  * NO custom system prompt -- opencode provides its own via the OpenAI-compatible API.
  */
-const OPENCODE_MODEL = 'qwen3.5-4b-opencode-agent';
+const OPENCODE_MODEL = 'qwen3-4b-opencode-agent';
 
 /**
  * OpenCodeAgent -- wraps the `opencode run` CLI with config injection,
@@ -99,10 +98,9 @@ export class OpenCodeAgent extends BaseAgent {
         //    Prefix with a directive to use bash tools — small models try to
         //    invoke opencode's "Skill" system instead of running bash commands.
         const prefixedInstruction = [
-            'IMPORTANT: You MUST use the Bash tool to run ALL shell commands described below.',
-            'Do NOT stop after the first command. Execute EVERY command in order.',
-            'Do NOT summarize results between commands. Just run the next command immediately.',
-            'Do NOT use Skills or any feature other than Bash, Read, and Edit.',
+            'CRITICAL: Execute ALL commands below in order. After each command completes, immediately run the next one. Do NOT stop, summarize, or explain between commands.',
+            'You have 4 tools: Bash, Read, Edit, Write. Use Bash for ALL shell commands.',
+            'After the last command, respond with a one-line summary.',
             '/no_think\n',
             instruction,
         ].join('\n');

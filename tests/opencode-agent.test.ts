@@ -52,10 +52,10 @@ assert(
     '6. Config has Ollama provider with /v1 baseURL'
 );
 
-// Test 7: Config has correct model (opencode variant without custom system prompt)
+// Test 7: Config has correct model (Qwen3, not Qwen 3.5 which has broken tool calling)
 assert(
-    config?.model === 'ollama/qwen3.5-4b-opencode-agent',
-    '7. Config has correct model (ollama/qwen3.5-4b-opencode-agent)'
+    config?.model === 'ollama/qwen3-4b-opencode-agent',
+    '7. Config has correct model (ollama/qwen3-4b-opencode-agent)'
 );
 
 // Test 8: Config permissions all explicit (no "ask" defaults)
@@ -68,36 +68,59 @@ assert(allExplicit, '8. Config permissions all explicit (allow or deny, no ask)'
 
 // Test 9: Config has tools: true for the model
 assert(
-    config?.provider?.ollama?.models?.['qwen3.5-4b-opencode-agent']?.tools === true,
+    config?.provider?.ollama?.models?.['qwen3-4b-opencode-agent']?.tools === true,
     '9. Config has tools: true for the model'
+);
+
+// Test 10: Config has aggressive tool denial (10 tools denied)
+const deniedTools = permissionKeys.filter((key: string) => permissions[key] === 'deny');
+assert(
+    deniedTools.length === 10,
+    `10. Config has 10 denied tools (got ${deniedTools.length}: ${deniedTools.join(', ')})`
+);
+
+// Test 11: Config denies glob, grep, list, task, todowrite, skill
+const expectedDenied = ['glob', 'grep', 'list', 'task', 'todowrite', 'skill'];
+const allExpectedDenied = expectedDenied.every((tool: string) => permissions[tool] === 'deny');
+assert(
+    allExpectedDenied,
+    '11. Config denies glob, grep, list, task, todowrite, skill'
+);
+
+// Test 12: Config allows read, edit, bash, write
+const expectedAllowed = ['read', 'edit', 'bash', 'write'];
+const allExpectedAllowed = expectedAllowed.every((tool: string) => permissions[tool] === 'allow');
+assert(
+    allExpectedAllowed,
+    '12. Config allows read, edit, bash, write'
 );
 
 // Source code analysis tests
 const sourcePath = path.join(__dirname, '..', 'src', 'agents', 'opencode', 'index.ts');
 const source = fs.readFileSync(sourcePath, 'utf-8');
 
-// Test 10: Source contains config injection pattern
+// Test 13: Source contains config injection pattern
 assert(
     source.includes('opencode.skill-eval-agent.json') && source.includes('base64'),
-    '10. Source has config injection (references config file and base64 encoding)'
+    '13. Source has config injection (references config file and base64 encoding)'
 );
 
-// Test 11: Source contains timeout wrapper
+// Test 14: Source contains timeout wrapper
 assert(
     source.includes('timeout'),
-    '11. Source has timeout wrapper (bash timeout command usage)'
+    '14. Source has timeout wrapper (bash timeout command usage)'
 );
 
-// Test 12: Source contains model unload pattern
+// Test 15: Source contains model unload pattern
 assert(
     source.includes('keep_alive'),
-    '12. Source has model unload pattern (keep_alive: 0)'
+    '15. Source has model unload pattern (keep_alive: 0)'
 );
 
-// Test 13: Source contains diagnostic logging
+// Test 16: Source contains diagnostic logging
 assert(
     source.includes('[OpenCodeAgent]'),
-    '13. Source has diagnostic logging ([OpenCodeAgent] prefix)'
+    '16. Source has diagnostic logging ([OpenCodeAgent] prefix)'
 );
 
 // Summary

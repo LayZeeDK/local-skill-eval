@@ -15,7 +15,7 @@
       }
     }
   },
-  "model": "ollama/qwen3-4b-opencode-agent",
+  "model": "ollama/qwen3-4b-skill-eval-opencode-agent",
   "permission": {
     "read": "allow",
     "edit": "allow",

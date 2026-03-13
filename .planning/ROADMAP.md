@@ -104,12 +104,14 @@ Plans:
 
 **Requirements:** AGENT-03, AGENT-04
 **Depends on:** Phase 5
-**Plans:** 3 plans
+**Plans:** 5 plans
 
 Plans:
 - [x] 05.1-01-PLAN.md -- Config foundation, prompt prefix fix, dual-provider 3-trial validation
 - [x] 05.1-02-PLAN.md -- Superseded by 01 (local already validated)
 - [x] 05.1-03-PLAN.md -- Superseded by 01 (Docker already validated)
+- [ ] 05.1-04-PLAN.md -- Gap closure: model naming conventions and dead Modelfile cleanup
+- [ ] 05.1-05-PLAN.md -- Gap closure: document LLM grader partial-credit limitation
 
 **Delivers:**
 - Qwen3-family Modelfiles replacing broken Qwen 3.5 (Ollama issues #14493, #14745)
@@ -182,7 +184,7 @@ Plans:
 | 4. OllamaToolAgent + Ollama Model Setup | v2.0 | 3/3 | Complete | 2026-03-10 |
 | 4.1. Tune Ollama Agent to 5 Min Trial Average | v2.0 | 3/3 | Complete | 2026-03-11 |
 | 5. OpenCodeAgent | v2.0 | 2/3 | Blocked (Plan 03) | -- |
-| 5.1. Tune OpenCodeAgent for Multi-Step Tool Execution | v2.0 | 3/3 | Complete | 2026-03-12 |
+| 5.1. Tune OpenCodeAgent for Multi-Step Tool Execution | v2.0 | 3/5 | Gap closure | -- |
 | 6. CI Integration | v2.0 | 0/? | Pending | -- |
 | 7. End-to-End Validation + Comparison | v2.0 | 0/? | Pending | -- |
 

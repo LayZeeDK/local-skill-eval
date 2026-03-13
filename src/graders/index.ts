@@ -1,4 +1,4 @@
-import { GraderConfig, GraderResult, CommandResult, EnvironmentProvider } from '../types';
+import { GraderConfig, GraderResult, EnvironmentProvider } from '../types';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 
@@ -139,6 +139,13 @@ export class LLMGrader implements Grader {
 
         const rubric = await fs.readFile(rubricPath, 'utf-8');
 
+        // Extract individual criteria from rubric bullet points (lines starting with "- ")
+        const criteriaLines = rubric
+            .split('\n')
+            .map(line => line.trim())
+            .filter(line => line.startsWith('- '))
+            .map(line => line.replace(/^- /, ''));
+
         // Build a comprehensive transcript for the LLM
         const sections: string[] = [];
 
@@ -176,21 +183,27 @@ export class LLMGrader implements Grader {
 
         const transcript = sections.join('\n\n');
 
-        const prompt = `You are an evaluation judge. Score the following agent session on a scale from 0.0 to 1.0 based on the rubric below.
+        const numberedCriteria = criteriaLines
+            .map((c, i) => `${i + 1}. ${c}`)
+            .join('\n');
 
-IMPORTANT CONTEXT: The agent runs inside a CLI wrapper (e.g., Gemini CLI). The agent's tool calls (file edits, shell commands) appear as text in the "Agent Output" section. This is a real execution trace, not hallucination — the "Commands Executed" section shows the CLI invocation and its captured output. The "Prior Grader Results" section shows objective automated test results that verify the actual filesystem state after the agent ran.
+        const prompt = `You are an evaluation judge. Evaluate the agent session below.
 
-## Rubric
-${rubric}
+STEP 1 — EXTRACT EVIDENCE: List every shell command the agent actually ran (from "Commands Executed" section). Only include commands that appear verbatim. If none, return an empty array.
+
+STEP 2 — CHECK EACH CRITERION: For each numbered criterion below, answer true ONLY if the commands_found evidence directly supports it. Answer false otherwise.
+
+## Criteria to evaluate (answer ALL ${criteriaLines.length}):
+${numberedCriteria}
 
 ## Session Transcript
 ${transcript}
 
-Respond with ONLY a JSON object: {"score": <number>, "reasoning": "<brief explanation>"}`;
+Respond with ONLY a JSON object: {"commands_found": ["cmd1", ...], "criteria": [{"criterion": "<exact criterion text>", "met": true/false}, ...], "reasoning": "<brief explanation>"}`;
 
         // Provider fallback chain: Ollama (local) -> Gemini (cloud) -> Anthropic (cloud)
         const ollamaHost = env?.OLLAMA_HOST || process.env.OLLAMA_HOST || 'http://localhost:11434';
-        const model = config.model || 'qwen2.5:3b';
+        const model = config.model || 'qwen3:4b';
         const apiKey = env?.GEMINI_API_KEY || process.env.GEMINI_API_KEY;
         const anthropicKey = env?.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY;
 
@@ -286,14 +299,15 @@ Respond with ONLY a JSON object: {"score": <number>, "reasoning": "<brief explan
     }
 
     private async callOllama(prompt: string, ollamaHost: string, config: GraderConfig): Promise<GraderResult | null> {
-        // Benchmark-validated Ollama defaults (Phase 2.1, qwen2.5:3b benchmark results)
-        // qwen2.5:3b: perfect discrimination (positive=1.0, empty=0.0, wrong=0.0),
-        // ~4.6s median wall time, 100% JSON Schema validity across all profiles.
-        const OLLAMA_NUM_CTX = 2048;
+        // qwen3:4b provides evidence-grounded checklist scoring (Phase 5.1 gap closure).
+        // qwen2.5:3b had good binary discrimination but hallucinated partial scores.
+        // num_ctx 4096 gives headroom for longer transcripts + evidence extraction.
+        // 300s timeout accommodates qwen3:4b on CPU (~5-10 tok/s with 4096 context).
+        const OLLAMA_NUM_CTX = 4096;
         const OLLAMA_NUM_PREDICT = 512;
-        const OLLAMA_TIMEOUT_MS = 120_000;
+        const OLLAMA_TIMEOUT_MS = 300_000;
 
-        const model = config.model || 'qwen2.5:3b';
+        const model = config.model || 'qwen3:4b';
 
         try {
             const response = await fetch(`${ollamaHost}/api/generate`, {
@@ -303,13 +317,28 @@ Respond with ONLY a JSON object: {"score": <number>, "reasoning": "<brief explan
                     model,
                     prompt,
                     stream: false,
+                    think: false,
                     format: {
                         type: 'object',
                         properties: {
-                            score: { type: 'number', minimum: 0.0, maximum: 1.0 },
+                            commands_found: {
+                                type: 'array',
+                                items: { type: 'string' },
+                            },
+                            criteria: {
+                                type: 'array',
+                                items: {
+                                    type: 'object',
+                                    properties: {
+                                        criterion: { type: 'string' },
+                                        met: { type: 'boolean' },
+                                    },
+                                    required: ['criterion', 'met'],
+                                },
+                            },
                             reasoning: { type: 'string' },
                         },
-                        required: ['score', 'reasoning'],
+                        required: ['commands_found', 'criteria', 'reasoning'],
                     },
                     options: {
                         temperature: 0,
@@ -326,7 +355,8 @@ Respond with ONLY a JSON object: {"score": <number>, "reasoning": "<brief explan
             }
 
             const data = await response.json() as any;
-            const text = data?.response || '';
+            // qwen3 models may put structured output in thinking field instead of response
+            const text = data?.response || data?.thinking || '';
 
             return this.parseResponse(text, config);
         } catch (err: any) {
@@ -414,19 +444,93 @@ Respond with ONLY a JSON object: {"score": <number>, "reasoning": "<brief explan
         try {
             // Extract JSON from response (may have markdown wrapping)
             const jsonMatch = text.match(/\{[\s\S]*\}/);
+
             if (jsonMatch) {
                 const parsed = JSON.parse(jsonMatch[0]);
-                const score = Math.max(0, Math.min(1, parseFloat(parsed.score) || 0));
-                return {
-                    grader_type: 'llm_rubric',
-                    score,
-                    weight: config.weight,
-                    details: parsed.reasoning || 'No reasoning provided'
-                };
+
+                // Checklist scoring with dimension-aware weighting.
+                // Based on CheckEval (EMNLP 2025) and RocketEval (ICLR 2025) findings
+                // that binary checklist decomposition dramatically improves small-model
+                // judge reliability over holistic scoring.
+                if (Array.isArray(parsed.criteria) && parsed.criteria.length > 0) {
+                    // Classify criteria by rubric dimension using generic keyword patterns.
+                    // "Workflow/compliance" = core task steps; "Efficiency" = resource usage.
+                    const isWorkflow = (text: string) =>
+                        /workflow|compliance|step|before.*fix|run.*check|run.*fix|run.*verify|mandatory/i.test(text);
+                    const isEfficiency = (text: string) =>
+                        /efficien|redundan|trial.and.error|reasonable.*command|unnecessary/i.test(text);
+
+                    // Technique A (prerequisite gating): If < 50% of workflow criteria are met,
+                    // efficiency criteria are vacuously true — override to false.
+                    // Ref: Autorubric (NAACL 2025) CANNOT_ASSESS strategy, simplified to binary gate.
+                    const workflowCriteria = parsed.criteria.filter((c: any) => isWorkflow(c.criterion));
+                    const workflowMet = workflowCriteria.filter((c: any) => c.met).length;
+                    const workflowScore = workflowCriteria.length > 0 ? workflowMet / workflowCriteria.length : 0;
+
+                    if (workflowScore < 0.5) {
+                        for (const c of parsed.criteria) {
+                            if (isEfficiency(c.criterion) && c.met) {
+                                c.met = false;
+                            }
+                        }
+                    }
+
+                    // Technique C (weighted scoring): Workflow criteria count 2x,
+                    // reflecting rubric dimension weights (Workflow 0-0.4 vs others 0-0.3).
+                    // Ref: RocketEval (ICLR 2025) confidence-weighted normalized scoring.
+                    let weightedMet = 0;
+                    let weightedTotal = 0;
+
+                    for (const c of parsed.criteria) {
+                        const w = isWorkflow(c.criterion) ? 2.0 : 1.0;
+                        weightedTotal += w;
+
+                        if (c.met) {
+                            weightedMet += w;
+                        }
+                    }
+
+                    let score = Math.max(0, Math.min(1, weightedTotal > 0 ? weightedMet / weightedTotal : 0));
+
+                    // Technique D (score cap): If the primary workflow criterion is false,
+                    // cap score at 0.4 to prevent partial attempts from exceeding midpoint.
+                    // Ref: RocketEval gate-criterion concept.
+                    const workflowFollowed = parsed.criteria.find(
+                        (c: any) => /mandatory.*workflow|follow.*workflow|step.*workflow/i.test(c.criterion)
+                    );
+
+                    if (workflowFollowed && !workflowFollowed.met) {
+                        score = Math.min(score, 0.4);
+                    }
+
+                    const checklist = parsed.criteria
+                        .map((c: any) => `${c.met ? '[OK]' : '[  ]'} ${c.criterion}`)
+                        .join('; ');
+
+                    return {
+                        grader_type: 'llm_rubric',
+                        score: Math.round(score * 1000) / 1000,
+                        weight: config.weight,
+                        details: `${parsed.reasoning || 'No reasoning'} | Checklist: ${checklist}`
+                    };
+                }
+
+                // Legacy format: direct score field
+                if (parsed.score !== undefined) {
+                    const score = Math.max(0, Math.min(1, parseFloat(parsed.score) || 0));
+
+                    return {
+                        grader_type: 'llm_rubric',
+                        score,
+                        weight: config.weight,
+                        details: parsed.reasoning || 'No reasoning provided'
+                    };
+                }
             }
         } catch (e) {
             // Fall through
         }
+
         return { grader_type: 'llm_rubric', score: 0, weight: config.weight, details: `Failed to parse LLM response: ${text}` };
     }
 }

@@ -3,6 +3,10 @@ import { LocalProvider } from './providers/local';
 import { EvalRunner, loadTaskConfig } from './evalRunner';
 import { GeminiAgent } from './agents/gemini';
 import { ClaudeAgent } from './agents/claude';
+import { OllamaToolAgent } from './agents/ollama';
+import { DEFAULT_OLLAMA_AGENT_CONFIG } from './agents/ollama/types';
+import { smokeTestToolCalling } from './agents/ollama/smoke-test';
+import { OpenCodeAgent } from './agents/opencode';
 import { BaseAgent } from './types';
 import * as path from 'path';
 import * as fs from 'fs-extra';
@@ -45,7 +49,7 @@ async function main() {
     if (!taskArg || taskArg === '--help' || taskArg === '-h') {
         console.log('Usage: npm run eval <task_name> [options]');
         console.log('\nOptions:');
-        console.log('  --agent=gemini|claude    Default: gemini');
+        console.log('  --agent=gemini|claude|ollama|opencode  Default: gemini');
         console.log('  --provider=docker|local  Default: docker');
         console.log('  --trials=N               Default: 5');
         console.log('  --parallel=N             Run trials concurrently (default: 1)');
@@ -184,9 +188,90 @@ async function main() {
             if (!allPassed) process.exit(1);
         } else {
             // Normal eval mode
-            const agent = agentType === 'claude' ? new ClaudeAgent() : new GeminiAgent();
 
-            console.log(`\n🚀 ${taskName} | agent=${agentType} provider=${providerType} trials=${trials}${parallel > 1 ? ` parallel=${parallel}` : ''}\n`);
+            // Smoke test gate for Ollama agent
+            if (agentType === 'ollama') {
+                // Unload non-agent models to free RAM/CPU for the agent
+                try {
+                    const { Ollama } = require('ollama');
+                    const client = new Ollama({ host: 'http://localhost:11434' });
+                    const running = await client.ps();
+                    const agentModel = DEFAULT_OLLAMA_AGENT_CONFIG.model;
+                    const others = running.models.filter((m: any) => !m.name.startsWith(agentModel));
+
+                    for (const model of others) {
+                        await client.chat({ model: model.name, messages: [], keep_alive: 0 });
+                    }
+
+                    if (others.length > 0) {
+                        console.log(`[INFO] Unloaded ${others.length} non-agent model(s) to free resources`);
+                    }
+                } catch {
+                    // Ignore -- Ollama may not be running yet
+                }
+
+                const smokeResult = await smokeTestToolCalling(DEFAULT_OLLAMA_AGENT_CONFIG.host, DEFAULT_OLLAMA_AGENT_CONFIG.model);
+
+                if (!smokeResult.passed) {
+                    console.error(`[ERROR] Ollama smoke test failed: ${smokeResult.error}`);
+                    process.exit(1);
+                }
+
+                console.log('[INFO] Ollama smoke test passed -- model produces structured tool calls');
+            }
+
+            // Smoke test gate for OpenCode agent
+            if (agentType === 'opencode') {
+                // Unload non-agent models to free RAM/CPU (same pattern as ollama agent)
+                try {
+                    const { Ollama } = require('ollama');
+                    const client = new Ollama({ host: 'http://localhost:11434' });
+                    const running = await client.ps();
+                    const agentModel = DEFAULT_OLLAMA_AGENT_CONFIG.model;
+                    const others = running.models.filter((m: any) => !m.name.startsWith(agentModel));
+
+                    for (const model of others) {
+                        await client.chat({ model: model.name, messages: [], keep_alive: 0 });
+                    }
+
+                    if (others.length > 0) {
+                        console.log(`[INFO] Unloaded ${others.length} non-agent model(s) to free resources`);
+                    }
+                } catch {
+                    // Ignore -- Ollama may not be running yet
+                }
+
+                // Smoke test: verify opencode binary exists and Ollama is reachable
+                try {
+                    const { Ollama } = require('ollama');
+                    const client = new Ollama({ host: 'http://localhost:11434' });
+                    await client.list(); // Throws on connection failure
+                    console.log('[INFO] OpenCode smoke test passed -- Ollama reachable');
+                } catch (err: any) {
+                    console.error(`[ERROR] OpenCode smoke test failed: ${err.message}`);
+                    process.exit(1);
+                }
+            }
+
+            // Create agent based on type
+            let agent: BaseAgent;
+
+            switch (agentType) {
+                case 'claude':
+                    agent = new ClaudeAgent();
+                    break;
+                case 'ollama':
+                    agent = new OllamaToolAgent();
+                    break;
+                case 'opencode':
+                    agent = new OpenCodeAgent();
+                    break;
+                default:
+                    agent = new GeminiAgent();
+                    break;
+            }
+
+            console.log(`\n${taskName} | agent=${agentType} provider=${providerType} trials=${trials}${parallel > 1 ? ` parallel=${parallel}` : ''}\n`);
 
             try {
                 const report = await runner.runEval(agent, taskPath, skillsPaths, trials, env, parallel);

@@ -1,94 +1,71 @@
-# Stack Research
+# Technology Stack
 
-**Domain:** Local LLM inference for skill evaluation grading + agent CLI backends
-**Researched:** 2026-03-08
-**Confidence:** MEDIUM-HIGH
+**Project:** local-skill-eval v2.0 -- opencode + Ollama Agent Backend
+**Researched:** 2026-03-10
+**Focus:** Stack additions for opencode CLI with Ollama backend, direct Ollama tool use fallback
+**Scope:** Only NEW capabilities. Existing stack (TypeScript, Node.js 24+, Ollama qwen2.5:3b grader, GitHub Actions, Docker) is validated and NOT re-researched.
 
-## Recommended Stack
+## Critical Finding: OpenCode Has No Windows ARM64 Support
 
-### Core Technologies
+**Confidence: HIGH** -- verified via GitHub issues [#4340](https://github.com/anomalyco/opencode/issues/4340), [#9232](https://github.com/anomalyco/opencode/issues/9232), [#9678](https://github.com/anomalyco/opencode/issues/9678), [#10302](https://github.com/anomalyco/opencode/issues/10302).
 
-| Technology | Version | Purpose | Why Recommended |
-|------------|---------|---------|-----------------|
-| **ollama** (server) | v0.17.7 | Local LLM server: model management, inference, API endpoints | De facto standard for local LLM serving. Native ARM64 Windows build. CPU inference on Snapdragon X Elite works. Exposes both OpenAI-compatible (`/v1/chat/completions`) and Anthropic-compatible (`/v1/messages`) endpoints -- the latter added in v0.14.0, eliminating the need for proxy translators. Manages model downloads, quantization formats (GGUF), and context windows. `ollama launch` (v0.15+) automates agent CLI configuration. |
-| **ollama** (npm) | 0.6.3 | Node.js client for Ollama native API | Official JS client. Uses Ollama's native `/api/chat` endpoint (not OpenAI-compat). Provides `chat()`, `generate()`, `embed()`, `list()`, `pull()`, `show()`, `ps()`, `create()`, `delete()`, `copy()`. Supports streaming via AsyncGenerator, structured JSON output, tool calling, and thinking mode. Single dependency (`whatwg-fetch`). TypeScript types included. ESM and CJS entry points. This is what the grader will use -- call Ollama directly via its native API for maximum control over model parameters. |
-| **opencode** (CLI) | v1.2.20 | Agent CLI for agentic coding evaluation | Open-source coding agent with 45K+ GitHub stars. Supports 75+ LLM providers including Ollama via OpenAI-compatible endpoint. Configuration via `~/.config/opencode/opencode.json`. Uses `@ai-sdk/openai-compatible` npm package internally. `ollama launch opencode` automates setup. Install via `npm i -g opencode-ai@latest`. |
-| **Claude Code** (CLI) | latest | Agent CLI for agentic coding evaluation | Anthropic's official coding agent. Connects to Ollama via `ANTHROPIC_BASE_URL=http://localhost:11434` + `ANTHROPIC_AUTH_TOKEN=ollama` (Ollama v0.14+ Anthropic compatibility). `ollama launch claude` automates setup. No proxy needed -- Ollama natively speaks Anthropic Messages API (`/v1/messages`). |
+OpenCode ships binaries for linux-x64, linux-arm64, darwin-x64, darwin-arm64, and **windows-x64 only**. There is no `opencode-windows-arm64` package. On Windows ARM64 (Snapdragon X Elite):
 
-### Supporting Libraries
+- `npm install -g opencode-ai` fails with EBADPLATFORM because the arm64 binary does not exist.
+- Manually extracting the x64 zip runs under Windows x86 emulation but has regressions: segfaults (v1.1.32), hangs (v1.1.15), and spawning failures.
+- Multiple GitHub issues request ARM64 support; none have been resolved as of v1.2.23 (March 9, 2026).
 
-| Library | Version | Purpose | When to Use |
-|---------|---------|---------|-------------|
-| `ollama` (npm) | 0.6.3 | Grader integration: call local LLM for rubric evaluation | Always -- this is how `LocalLLMGrader` talks to Ollama |
-| `@huggingface/transformers` | 3.8.1 | In-process ONNX inference (NPU path) | Only if pursuing NPU acceleration via ONNX models. See "NPU Path" section below. NOT for the primary grading workflow -- too slow for LLM-scale text generation on CPU-only WASM (2-5 tok/s). Best for embedding/classification tasks, not generative grading. |
-| `@huggingface/inference` | 4.13.15 | Client for HF Inference endpoints | NOT recommended. Designed for cloud HF Inference API. Adds unnecessary dependency when Ollama handles all local inference. |
+**Impact on local development:** OpenCode is unreliable on the development machine (Surface Laptop 7, Snapdragon X Elite). May work intermittently via x86 emulation but cannot be depended on.
 
-### Development Tools
+**Impact on CI:** The CI target is ubuntu-24.04-arm (ARM64 Linux), where opencode **does** ship a native arm64 binary. OpenCode will work reliably in CI.
 
-| Tool | Purpose | Notes |
-|------|---------|-------|
-| Ollama CLI | Model management, server lifecycle, agent launch | `ollama pull`, `ollama list`, `ollama serve`, `ollama launch` |
-| LM Studio | Alternative model server (Anthropic-compat since v0.4.1) | Backup option if Ollama has issues on ARM64. Provides UI for model browsing. Also CPU-only on Snapdragon. |
+**Recommendation:** Prioritize CI-first development. Test opencode integration in CI where ARM64 Linux is supported. For local development, use the direct Ollama tool use fallback path (which depends only on the `ollama` npm package and works everywhere).
 
-## Ollama API Architecture
+## Recommended Stack Additions
 
-Ollama exposes **three** API surfaces. Understanding which to use where is critical:
+### OpenCode CLI (Agent Backend)
 
-### 1. Native Ollama API (`/api/chat`, `/api/generate`)
-- **Used by:** `ollama` npm client (the grader)
-- **Why:** Full control over Ollama-specific options (`num_ctx`, `temperature`, `keep_alive`, `think`). Structured JSON output via `format` parameter. No translation layer.
-- **Endpoint:** `http://localhost:11434/api/chat`
+| Technology | Version | Purpose | Why |
+|------------|---------|---------|-----|
+| **opencode** (CLI) | v1.2.23 | Agent CLI for agentic coding evaluation | Open-source coding agent (Go binary) with 45K+ GitHub stars. Supports Ollama via OpenAI-compatible endpoint. `opencode run` provides non-interactive mode for automation. Native ARM64 Linux binary for CI. |
 
-### 2. OpenAI-Compatible API (`/v1/chat/completions`)
-- **Used by:** OpenCode (via `@ai-sdk/openai-compatible`)
-- **Why:** OpenCode's provider system expects OpenAI-format endpoints.
-- **Endpoint:** `http://localhost:11434/v1/chat/completions`
-
-### 3. Anthropic-Compatible API (`/v1/messages`)
-- **Used by:** Claude Code (via `ANTHROPIC_BASE_URL`)
-- **Why:** Claude Code natively speaks Anthropic Messages API. Ollama v0.14+ translates this internally. No proxy needed.
-- **Endpoint:** `http://localhost:11434/v1/messages`
-- **Supports:** Messages, streaming, system prompts, tool calling, vision, thinking. Does NOT support token counting, prompt caching, or batches.
-
-### Confidence: HIGH
-Verified via Ollama official docs, ollama.com/blog/claude, and docs.ollama.com/api/anthropic-compatibility.
-
-## `ollama launch` Command (v0.15+)
-
-The `ollama launch` command automates agent CLI configuration. It sets the necessary environment variables and config files without manual intervention.
-
+**Install methods:**
 ```bash
-# Interactive (choose agent from menu)
-ollama launch
+# CI (ubuntu-24.04-arm) -- preferred
+npm i -g opencode-ai@latest
 
-# Direct launch with specific agent and model
-ollama launch claude --model qwen3-coder
-ollama launch opencode --model qwen3-coder
+# Alternative CI install
+curl -fsSL https://opencode.ai/install | bash
 
-# Configure without launching (inspect what it sets)
-ollama launch claude --config
+# Local dev (Windows ARM64) -- UNRELIABLE, use at own risk
+# Scoop may work better than npm: scoop install opencode
+# Or manually extract opencode-windows-x64.zip from GitHub releases
 ```
 
-### What it does for Claude Code:
-Sets `ANTHROPIC_BASE_URL=http://localhost:11434`, `ANTHROPIC_AUTH_TOKEN=ollama`, launches `claude --model <selected-model>`.
+**Non-interactive execution:**
+```bash
+# Basic non-interactive run (auto-approves all permissions)
+opencode run "Apply the superlint skill to fix linting issues" --format json --quiet
 
-### What it does for OpenCode:
-Writes/updates `~/.config/opencode/opencode.json` with Ollama provider config, launches `opencode`.
+# With model override
+opencode run "..." --model ollama/qwen3:8b --format json --quiet
 
-### Critical: Context Window
-Ollama defaults to 4096 tokens. Agent CLIs need 64K+ for effective operation. Either:
-1. Create a Modelfile with `PARAMETER num_ctx 65536` and `ollama create` a custom model
-2. Use `OLLAMA_CONTEXT_LENGTH` env var (v0.17+ supports dynamic context scaling)
-3. Set `num_ctx` via API parameter in the grader
+# Attach to running server (avoids MCP cold boot per run)
+opencode run "..." --attach --port 3000
+```
 
-### Confidence: HIGH
-Verified via ollama.com/blog/launch, docs.ollama.com/cli.
+**Key flags for eval integration:**
+- `--format json` -- structured JSON event output for parsing
+- `--quiet` / `-q` -- suppress spinner animation (critical for piped output)
+- `--model provider/model` -- override model selection
+- `--continue` / `-c` -- resume previous session
+- No formal `--non-interactive` flag exists yet (open issue [#10411](https://github.com/anomalyco/opencode/issues/10411)); `opencode run` with a prompt argument is the current workaround
 
-## Agent CLI Configuration Details
+**Known issue:** `opencode run` can hang in CI waiting for input that never comes (issue [#5888](https://github.com/anomalyco/opencode/issues/5888)). Mitigate by always providing the full prompt as a CLI argument and using `--quiet`.
 
-### OpenCode Configuration
+### OpenCode Ollama Configuration
 
-**Config file:** `~/.config/opencode/opencode.json`
+**Config file:** `~/.config/opencode/opencode.json` (or project-local `opencode.json`)
 
 ```json
 {
@@ -101,8 +78,12 @@ Verified via ollama.com/blog/launch, docs.ollama.com/cli.
         "baseURL": "http://localhost:11434/v1"
       },
       "models": {
-        "qwen3-coder": {
-          "name": "Qwen3 Coder"
+        "qwen3:8b": {
+          "name": "Qwen3 8B",
+          "limit": {
+            "context": 16384,
+            "output": 4096
+          }
         }
       }
     }
@@ -110,234 +91,264 @@ Verified via ollama.com/blog/launch, docs.ollama.com/cli.
 }
 ```
 
-**Install:** `npm i -g opencode-ai@latest`
-
-### Claude Code Configuration
-
-**Environment variables:**
+**Alternative setup via `ollama launch`** (Ollama v0.15+):
 ```bash
-export ANTHROPIC_BASE_URL="http://localhost:11434"
-export ANTHROPIC_AUTH_TOKEN="ollama"
+ollama launch opencode --model qwen3:8b
+# or config-only mode (writes config without launching)
+ollama launch opencode --config
 ```
 
-**Launch:** `claude --model qwen3-coder`
+**Context window warning:** Ollama defaults to 4096 tokens. OpenCode recommends 64K+ for effective operation. For 16GB RAM targets, 16K-32K is the practical maximum. If tool calls fail, increase `num_ctx`.
 
-**VS Code settings (alternative):**
-```json
-{
-  "claudeCode.environmentVariables": [
-    { "name": "ANTHROPIC_BASE_URL", "value": "http://localhost:11434" },
-    { "name": "ANTHROPIC_AUTH_TOKEN", "value": "ollama" }
-  ]
-}
-```
+**Confidence: HIGH** -- verified via [opencode.ai/docs/providers](https://opencode.ai/docs/providers/), [docs.ollama.com/integrations/opencode](https://docs.ollama.com/integrations/opencode), community guides.
 
-**To revert to Anthropic cloud:** `unset ANTHROPIC_BASE_URL && unset ANTHROPIC_AUTH_TOKEN`
+### Direct Ollama Tool Use (Fallback Path)
 
-### Confidence: HIGH
-Verified via code.claude.com/docs/en/llm-gateway, opencode.ai/docs/providers, multiple community guides.
+| Technology | Version | Purpose | Why |
+|------------|---------|---------|-----|
+| **ollama** (npm) | 0.6.3 | Node.js client for Ollama chat API with tool calling | Already a dependency for grading. Tool calling via `tools` parameter in `chat()`. Avoids external CLI dependency entirely. TypeScript types included. Works everywhere Ollama runs. |
 
-## CPU/NPU Model Recommendations for ARM64 Windows (Snapdragon X Elite)
+**Confidence: HIGH** -- already validated in v1.0 for grading. Tool calling is a documented API feature.
 
-### Hardware Profile
-- CPU: 12-core Qualcomm Snapdragon X Elite X1E80100 (3.4-4 GHz, ARM NEON + SVE2)
-- NPU: Qualcomm Hexagon (45 TOPS, INT4/INT8 only, ONNX models only)
-- RAM: 32 GB LPDDR5X (16 GB usable)
-- GPU: Qualcomm Adreno X1-85 (poor ML support, no CUDA)
-
-### Key Constraint: Ollama = CPU-Only on ARM64 Windows
-Ollama uses llama.cpp under the hood with GGUF models. On ARM64 Windows, there is **no GPU/NPU backend** -- only CPU via `ggml-cpu` with ARM NEON optimizations. The Hexagon NPU only works with ONNX models via QNN Execution Provider, which Ollama does not support.
-
-### Recommended Models for Grading (via Ollama, CPU)
-
-| Model | Parameters | RAM (Q4_K_M) | Purpose | Why |
-|-------|-----------|--------------|---------|-----|
-| **Phi-4 Reasoning** | 14B | ~9 GB | **Primary grader** | Best-in-class instruction following (IFBench 0.834). Grading requires precise rubric adherence, not creative coding. Strong reasoning (AIME 0.753). Fits in 16 GB with room for Node.js + Docker. |
-| **Qwen 2.5 Coder 14B** | 14B | ~9 GB | **Alternative grader** | State-of-the-art on code evaluation benchmarks. Better code understanding than Phi-4 but slightly weaker instruction following. Good for code-quality rubrics. |
-| **DeepSeek R1 Distill 8B** | 8B | ~5-6 GB | **Lightweight grader** | Inherits chain-of-thought reasoning from full R1. Useful when running grader alongside agent CLI (lower memory pressure). Good for debugging/reasoning rubrics. |
-
-### Recommended Models for Agent CLIs (via Ollama, CPU)
-
-| Model | Parameters | RAM (Q4_K_M) | Purpose | Why |
-|-------|-----------|--------------|---------|-----|
-| **qwen3-coder** | 30B | ~18 GB | **Agent model (if fits)** | Ollama's recommended coding model. May need Q3 quantization to fit in 16 GB alongside overhead. Best code quality. |
-| **Qwen 2.5 Coder 14B** | 14B | ~9 GB | **Primary agent model** | Best balance of quality and memory. 128K context window. Handles 40+ languages. Fits comfortably with agent CLI overhead. |
-| **Qwen3 4B** | 4B | ~2.75 GB | **Fast agent model** | For rapid iteration and testing. Won't match larger models on complex tasks but runs fast on CPU and leaves plenty of RAM. |
-
-### Quantization Guidance
-
-| Format | Quality Loss | Speed | Recommendation |
-|--------|-------------|-------|----------------|
-| Q4_K_M | ~2-5% | Baseline | **Default choice.** Gold standard for 16 GB systems. K-quantization preserves critical weights. |
-| Q5_K_M | ~1-3% | ~10% slower | Use when RAM allows (14B models: ~11 GB). Better for grading accuracy. |
-| Q3_K_M | ~5-10% | ~10% faster | Only if running large model (30B) that doesn't fit at Q4. |
-| IQ3_XS | Varies | Experimental | **Avoid on ARM64 Windows.** Known to load slowly or crash. |
-| AWQ/GPTQ | N/A | N/A | **Not supported on Windows ARM64.** |
-
-### Expected Performance (CPU-only, Snapdragon X Elite)
-- **Token generation:** 5-15 tokens/second for 14B models at Q4_K_M (estimate based on comparable ARM64 benchmarks)
-- **Prompt processing:** Faster than generation, typically 20-50 tok/s for moderate prompts
-- **Grading latency:** 10-30 seconds per rubric evaluation (typical 200-500 token response)
-- **Agent CLI:** Usable but noticeably slower than cloud models. Expect 30-60 second response times for complex operations.
-
-### Confidence: MEDIUM
-Performance estimates are extrapolated from community reports on similar hardware. No authoritative benchmark for Snapdragon X Elite + Ollama v0.17 was found. The model recommendations are HIGH confidence based on multiple benchmark sources.
-
-## NPU Path (Future Optimization, Not Primary)
-
-The Snapdragon X Elite's Hexagon NPU (45 TOPS INT4/INT8) is **unused** by Ollama/llama.cpp. The only working NPU acceleration path today:
-
-1. **ONNX Runtime + QNN Execution Provider** -- uses Qualcomm's NPU directly
-2. **Models must be in ONNX format** -- not GGUF
-3. **Limited to ~7B parameters** -- larger models lack Qualcomm tooling support
-4. **Working models:** Phi-3.5 Mini, Phi-3, Llama-3.1-8B (ONNX), Qwen-2.5-7B (ONNX)
-5. **Node.js support:** `onnxruntime-node` (v1.21.0) has ARM64 Windows binaries but **QNN EP is NOT in pre-built npm binaries**. Would require building from source.
-6. **`@huggingface/transformers`** (v3.8.1) uses `onnxruntime-node` under the hood. Supports CPU EP natively but not QNN via npm.
-
-**Recommendation:** Do NOT pursue NPU acceleration in the initial milestone. The ecosystem is immature for Node.js + QNN. Use Ollama CPU inference as the primary path. Revisit NPU when `onnxruntime-node` ships QNN pre-built binaries (tracked in onnxruntime GitHub issues).
-
-### Confidence: HIGH
-Verified via onnxruntime.ai/docs/execution-providers/QNN-ExecutionProvider.html, npm registry for onnxruntime-node, and community reports from Snapdragon X Elite users.
-
-## Installation
-
-```bash
-# Ollama server (Windows ARM64)
-# Download from https://ollama.com/download/windows
-# Or via winget:
-winget install ollama.ollama
-
-# Verify version (need v0.15+ for launch, v0.17+ for dynamic context)
-ollama --version
-
-# Pull recommended models
-ollama pull phi4-reasoning:14b-q4_K_M
-ollama pull qwen2.5-coder:14b-q4_K_M
-ollama pull qwen3-coder
-
-# Node.js client (for grader integration)
-npm install ollama@0.6.3
-
-# Agent CLIs
-npm i -g opencode-ai@latest
-# Claude Code: already installed (curl -fsSL https://claude.ai/install.sh | bash)
-
-# Context window setup for agent CLIs
-# Create a Modelfile for 64K context:
-# FROM qwen2.5-coder:14b-q4_K_M
-# PARAMETER num_ctx 65536
-# Then: ollama create qwen2.5-coder-64k -f Modelfile
-```
-
-## Alternatives Considered
-
-| Recommended | Alternative | When to Use Alternative |
-|-------------|-------------|-------------------------|
-| `ollama` npm client | Direct HTTP `fetch()` to Ollama REST API | Only if you need absolute minimal dependencies. The `ollama` npm client adds type safety, streaming helpers, and a single `whatwg-fetch` dep. Use direct fetch only for the Anthropic-compat endpoint (which the npm client doesn't wrap). |
-| `ollama` npm client | `@huggingface/transformers` for in-process inference | Only for non-generative tasks (embeddings, classification). WASM-based text generation is 2-5 tok/s -- unusable for LLM grading. If NPU support matures in `onnxruntime-node`, revisit for small models. |
-| Ollama server | LM Studio | If Ollama has ARM64-specific bugs. LM Studio v0.4.1+ has Anthropic-compatible endpoint (`/v1/messages`). Same CPU-only limitation on Snapdragon. Provides UI for model browsing. Not scriptable for `ollama launch`-style automation. |
-| Ollama native Anthropic compat | LiteLLM proxy | Only if you need multi-provider routing, team auth, or audit logging. For single-developer local use, LiteLLM adds Python + Redis + PostgreSQL dependencies for no benefit. Ollama v0.14+ eliminates the need for API translation proxies. |
-| Ollama native Anthropic compat | claude-code-proxy | Never. Ollama v0.14+ makes this obsolete. The proxy was needed when Ollama only spoke OpenAI format. |
-
-## What NOT to Use
-
-| Avoid | Why | Use Instead |
-|-------|-----|-------------|
-| `@huggingface/inference` | Designed for HF cloud Inference API, not local endpoints. Adds unnecessary abstraction over what Ollama already provides. | `ollama` npm client for local inference |
-| `ollama-node` | Unofficial, unmaintained, work-in-progress by the maintainer's own admission | `ollama` (official npm package) |
-| `ollama-js-client` | Community wrapper with less features than official client | `ollama` (official npm package) |
-| `ai-sdk-ollama` | Vercel AI SDK v6 provider -- adds heavy AI SDK dependency for features we don't need | `ollama` npm client directly |
-| LiteLLM (for this project) | Python proxy server requiring Redis + PostgreSQL. Massively over-engineered for single-developer local use. Ollama v0.14+ Anthropic compatibility eliminates the translation need. | Ollama's native Anthropic-compatible endpoint |
-| claude-code-proxy | Obsolete. Was needed pre-Ollama v0.14 when no native Anthropic compat existed. | Ollama v0.14+ native Anthropic compatibility |
-| GPU-dependent models | Snapdragon X Elite has no CUDA, no ROCm, and Adreno GPU has poor ML support | CPU-only GGUF models via Ollama |
-| AWQ/GPTQ quantization | Not supported on Windows ARM64 | GGUF Q4_K_M or Q5_K_M quantization |
-| IQ3_XS quantization | Known to load slowly or crash on ARM64 Windows | Q3_K_M if you must go below Q4 |
-| `@huggingface/transformers` for LLM grading | WASM text generation is 2-5 tok/s. A single grading call would take minutes. | Ollama with GGUF models (5-15 tok/s on CPU) |
-
-## Stack Patterns by Variant
-
-**For the grader (replacing LLMGrader):**
-- Use `ollama` npm client calling Ollama's native `/api/chat` endpoint
-- Model: Phi-4 Reasoning 14B Q4_K_M (best instruction following for rubric adherence)
-- Set `temperature: 0`, `format: 'json'` for deterministic structured output
-- Set `num_ctx` appropriately for the rubric + transcript length
-
-**For OpenCode agent CLI backend:**
-- Use `ollama launch opencode --model qwen2.5-coder:14b` or manual config
-- Model: Qwen 2.5 Coder 14B Q4_K_M (best coding model that fits in memory)
-- Must set 64K+ context window via Modelfile
-
-**For Claude Code agent CLI backend:**
-- Use `ollama launch claude --model qwen2.5-coder:14b` or manual env vars
-- Model: Same Qwen 2.5 Coder 14B Q4_K_M
-- `ANTHROPIC_BASE_URL=http://localhost:11434`, `ANTHROPIC_AUTH_TOKEN=ollama`
-
-**Sequential execution pattern (critical for 16 GB):**
-- Do NOT run grader and agent CLI simultaneously -- both need the LLM loaded in RAM
-- Ollama's `keep_alive` parameter controls how long models stay loaded (default: 5 minutes)
-- Consider `keep_alive: 0` after grading to immediately free RAM for the next agent CLI run
-
-## Version Compatibility
-
-| Package A | Compatible With | Notes |
-|-----------|-----------------|-------|
-| `ollama` npm 0.6.3 | Ollama server v0.14+ | npm client uses native Ollama API; Anthropic compat is server-side only |
-| Ollama v0.17.7 | Claude Code (latest) | Via Anthropic-compatible `/v1/messages` endpoint |
-| Ollama v0.17.7 | OpenCode v1.2.20 | Via OpenAI-compatible `/v1/chat/completions` endpoint |
-| `ollama launch` | Ollama v0.15+ | Command not available in earlier versions |
-| Dynamic context scaling | Ollama v0.17+ | Auto-scales context based on available RAM |
-| `@huggingface/transformers` 3.8.1 | `onnxruntime-node` 1.21.0 | ONNX Runtime for Node.js -- CPU only on ARM64 Windows (no QNN in npm prebuilds) |
-| Node.js 24+ | `ollama` npm 0.6.3 | Uses native fetch -- no polyfill needed on Node 24 |
-| TypeScript 5.9+ | `ollama` npm 0.6.3 | Types bundled in package |
-
-## Grader Integration Pattern
-
-The existing `LLMGrader` calls Gemini/Anthropic cloud APIs. The new `LocalLLMGrader` will use the `ollama` npm client:
-
+**Tool calling pattern:**
 ```typescript
 import { Ollama } from 'ollama';
 
 const ollama = new Ollama({ host: 'http://localhost:11434' });
 
-// In LocalLLMGrader.grade():
-const response = await ollama.chat({
-  model: 'phi4-reasoning:14b-q4_K_M',
-  messages: [{ role: 'user', content: prompt }],
-  format: 'json',      // Structured output -- returns valid JSON
-  options: {
-    temperature: 0,     // Deterministic for grading consistency
-    num_ctx: 8192,      // Enough for rubric + transcript
+// Define tools the agent can use
+const tools = [
+  {
+    type: 'function' as const,
+    function: {
+      name: 'write_file',
+      description: 'Write content to a file',
+      parameters: {
+        type: 'object',
+        required: ['path', 'content'],
+        properties: {
+          path: { type: 'string', description: 'File path' },
+          content: { type: 'string', description: 'File content' },
+        },
+      },
+    },
   },
-  stream: false,        // Wait for complete response
-});
+  {
+    type: 'function' as const,
+    function: {
+      name: 'run_command',
+      description: 'Execute a shell command',
+      parameters: {
+        type: 'object',
+        required: ['command'],
+        properties: {
+          command: { type: 'string', description: 'Shell command to execute' },
+        },
+      },
+    },
+  },
+];
 
-const parsed = JSON.parse(response.message.content);
-// { "score": 0.85, "reasoning": "..." }
+// Agent loop
+const messages = [{ role: 'user' as const, content: instruction }];
+
+while (true) {
+  const response = await ollama.chat({
+    model: 'qwen3:8b',
+    messages,
+    tools,
+    options: { num_ctx: 16384, temperature: 0 },
+  });
+
+  if (!response.message.tool_calls?.length) {
+    break; // No more tool calls -- agent is done
+  }
+
+  // Execute tool calls
+  messages.push(response.message);
+
+  for (const call of response.message.tool_calls) {
+    const result = await executeToolCall(call.function.name, call.function.arguments);
+    messages.push({
+      role: 'tool' as const,
+      content: JSON.stringify(result),
+    });
+  }
+}
 ```
 
-### Confidence: HIGH for the pattern. MEDIUM for specific model choice (depends on benchmarking).
+**Why this is the fallback, not the primary path:** OpenCode provides a full agent scaffold (file editing, code search, LSP integration, session management) that would take significant effort to replicate. The direct Ollama path only makes sense if opencode+Ollama proves unworkable for the eval use case.
+
+### Ollama Models for Agent Tasks (Tool Calling)
+
+**Constraint reminder:** 16 GB RAM on both local machine (usable) and CI runner. Model + KV cache + Node.js + Docker overhead must fit.
+
+| Model | Total Params | Active Params | Size (Q4_K_M) | RAM with 16K ctx | Tool Calling | Recommendation |
+|-------|-------------|---------------|---------------|------------------|-------------|----------------|
+| **qwen3:8b** | 8B | 8B (dense) | 5.2 GB | ~8 GB | Yes -- trained with tool tokens | **Primary choice.** Best fit for 16 GB constraint. Matches qwen2.5-14b quality per Alibaba benchmarks. Thinking + non-thinking modes. |
+| **qwen3-coder:30b-a3b** | 30B | 3.3B (MoE) | ~18.6 GB | ~22 GB | Yes -- specialized parser | **Does NOT fit.** Weights alone exceed 16 GB. Requires 20-24 GB minimum. Out of scope for CI runner. |
+| **qwen3:4b** | 4B | 4B (dense) | ~2.7 GB | ~4.5 GB | Yes -- but less reliable | **Fallback for testing.** Rivals qwen2.5-7b quality. Very fast on CPU. Good for rapid iteration. |
+| **qwen2.5-coder:7b** | 7B | 7B (dense) | ~4.7 GB | ~7 GB | Yes | **Alternative.** Strong code-specific training. 128K context support. Already familiar from v1.0 research. |
+| **llama3.1:8b** | 8B | 8B (dense) | ~4.9 GB | ~7.5 GB | Yes | **Alternative.** Meta's model with good tool use. Less coding-focused than Qwen. |
+
+**Model recommendation: qwen3:8b (Q4_K_M)** because:
+1. Fits in 16 GB with 16K context (~8 GB total), leaving room for Node.js, Docker, and overhead
+2. Tool calling trained natively (not bolted on)
+3. Agent capabilities verified by Alibaba (tool integration in both thinking and non-thinking modes)
+4. Performance matches qwen2.5-14b (the model we'd ideally use if RAM allowed)
+5. Available directly from Ollama registry: `ollama pull qwen3:8b`
+
+**Context window setup for agent use:**
+```bash
+# Create a variant with 16K context (saves as a new model tag)
+ollama run qwen3:8b
+>>> /set parameter num_ctx 16384
+>>> /save qwen3:8b-16k
+>>> /bye
+
+# Or via Modelfile
+echo 'FROM qwen3:8b
+PARAMETER num_ctx 16384' > Modelfile
+ollama create qwen3:8b-16k -f Modelfile
+```
+
+**Why NOT 64K context:** At 64K, the KV cache alone would consume ~8-10 GB for an 8B model, pushing total RAM to 15+ GB. Combined with Node.js and Docker overhead, this exceeds the 16 GB limit. Start with 16K and increase only if agent task completion requires more context.
+
+**Confidence: HIGH for qwen3:8b fitting in 16 GB.** RAM estimates verified via [Ollama VRAM guide](https://localllm.in/blog/ollama-vram-requirements-for-local-llms), [Qwen3 specs](https://apxml.com/models/qwen3-8b), and community reports.
+
+**Confidence: MEDIUM for tool calling quality at 8B scale.** Community consensus is that models under 14B have less reliable tool calling. The 8B model will work but may need prompt engineering to avoid hallucinated tool calls. The thinking mode in Qwen3 helps with reasoning about when to call tools.
+
+### Integration with Existing Eval Runner
+
+The existing agent pattern (from `BaseAgent`):
+
+```typescript
+// src/agents/gemini.ts pattern -- same interface for opencode
+export class OpenCodeAgent extends BaseAgent {
+    async run(
+        instruction: string,
+        _workspacePath: string,
+        runCommand: (cmd: string) => Promise<CommandResult>
+    ): Promise<string> {
+        const b64 = Buffer.from(instruction).toString('base64');
+        await runCommand(`echo '${b64}' | base64 -d > /tmp/.prompt.md`);
+
+        const command = `opencode run "$(cat /tmp/.prompt.md)" --format json --quiet`;
+        const result = await runCommand(command);
+
+        if (result.exitCode !== 0) {
+            console.error('OpenCodeAgent: opencode CLI failed to execute correctly.');
+        }
+
+        return result.stdout + '\n' + result.stderr;
+    }
+}
+```
+
+For the direct Ollama fallback, the agent would NOT use `runCommand` to shell out. Instead it would use the `ollama` npm client directly with a tool-calling loop, executing tool calls via the existing `runCommand` function:
+
+```typescript
+export class OllamaAgent extends BaseAgent {
+    async run(
+        instruction: string,
+        workspacePath: string,
+        runCommand: (cmd: string) => Promise<CommandResult>
+    ): Promise<string> {
+        const ollama = new Ollama({ host: 'http://localhost:11434' });
+        // ... tool-calling loop using ollama.chat() with tools
+        // Execute file operations and commands via runCommand()
+        // Return transcript of all actions taken
+    }
+}
+```
+
+**What NOT to change:**
+- Do NOT replace the existing `LLMGrader` or its qwen2.5:3b model -- it's validated and working
+- Do NOT change `BaseAgent` interface -- new agents implement the same `run()` contract
+- Do NOT add `ollama` as a new dependency -- it should already be added for the grader (if not yet, add it)
+- Do NOT run agent and grader models simultaneously -- sequential execution is required (16 GB constraint)
+
+## Existing Stack (Validated, Not Changed)
+
+These are documented for completeness. They were researched in v1.0 and remain unchanged.
+
+| Technology | Version | Purpose | Status |
+|------------|---------|---------|--------|
+| TypeScript | 5.9+ | Language | Validated |
+| Node.js | 24+ | Runtime | Validated |
+| Ollama server | v0.17+ | LLM inference server | Validated |
+| qwen2.5:3b | Q4_K_M | Grader model | Validated -- perfect discrimination |
+| GitHub Actions | ubuntu-24.04-arm | CI runner | Validated |
+| Docker | latest | Task isolation | Validated |
+| `dockerode` | 4.0.9 | Docker API client | Validated |
+| `toml` | 3.0.0 | Config parsing | Validated |
+
+## New Dependencies Summary
+
+```bash
+# Runtime dependency (if not already added)
+npm install ollama@0.6.3
+
+# Global CLI (CI only -- unreliable on Windows ARM64)
+npm i -g opencode-ai@latest
+
+# Ollama models to pull
+ollama pull qwen3:8b           # 5.2 GB -- agent model for opencode + direct tool use
+# qwen2.5:3b already pulled    # grader model (existing)
+```
+
+**Total new npm dependencies:** 1 package (`ollama` -- may already be present)
+**Total new global CLIs:** 1 (`opencode-ai` -- CI only)
+**Total new Ollama models:** 1 (`qwen3:8b` -- 5.2 GB download)
+
+## Alternatives Considered
+
+| Category | Recommended | Alternative | Why Not |
+|----------|-------------|-------------|---------|
+| Agent model | qwen3:8b (5.2 GB) | qwen3-coder:30b-a3b (18.6 GB) | Does not fit in 16 GB RAM. Weights alone exceed the limit. |
+| Agent model | qwen3:8b (5.2 GB) | qwen2.5-coder:14b (9 GB) | Fits locally (32 GB) but risky on CI (16 GB) with 16K context (~12 GB total). qwen3:8b matches qwen2.5-14b quality at half the RAM. |
+| Agent CLI | opencode | Claude Code with Ollama | Claude Code + Ollama requires Anthropic-compatible API (v0.14+). This works but Claude Code's Windows ARM64 support has its own issues. Defer to after opencode path is proven. |
+| Direct tool use | ollama npm client | LangChain.js + @langchain/ollama | Adds heavy framework dependency. The ollama npm client's `chat()` with `tools` parameter does everything needed. LangChain is overkill for a simple tool-calling loop. |
+| Direct tool use | ollama npm client | Vercel AI SDK + ai-sdk-ollama | Requires AI SDK v6 dependency chain. Over-engineered for calling one Ollama model with tools. |
+| Agent scaffold | opencode | Building from scratch | OpenCode provides file editing, code search, LSP, session management. Replicating this for the eval framework would be months of work for marginal benefit. |
+| Agent model context | 16K tokens | 64K tokens | KV cache at 64K would consume ~8-10 GB, pushing total past 16 GB. Start small, increase if needed. |
+
+## Version Compatibility Matrix
+
+| Component A | Component B | Compatibility | Notes |
+|-------------|-------------|---------------|-------|
+| opencode v1.2.23 | Ollama v0.17+ | Via OpenAI-compatible /v1 endpoint | opencode uses @ai-sdk/openai-compatible internally |
+| opencode v1.2.23 | ubuntu-24.04-arm (CI) | Native arm64 binary | Works reliably |
+| opencode v1.2.23 | Windows 11 ARM64 | **NOT SUPPORTED** | No arm64 binary; x86 emulation has regressions |
+| ollama npm 0.6.3 | Ollama server v0.17+ | Full compatibility | Tool calling, structured output, streaming all supported |
+| ollama npm 0.6.3 | Node.js 24+ | Full compatibility | Uses native fetch, TypeScript types included |
+| qwen3:8b | Ollama tool calling | Supported | Trained with tool-specific tokens |
+| qwen3:8b | opencode | Supported | Via OpenAI-compatible endpoint |
 
 ## Sources
 
-- [Ollama official docs](https://docs.ollama.com) -- API reference, CLI reference, Anthropic compatibility
-- [Ollama blog: Claude Code compatibility](https://ollama.com/blog/claude) -- v0.14 Anthropic Messages API support
-- [Ollama blog: launch command](https://ollama.com/blog/launch) -- v0.15 agent CLI automation
-- [ollama/ollama-js GitHub](https://github.com/ollama/ollama-js) -- Official JS client API surface
-- [npm registry: ollama@0.6.3](https://registry.npmjs.org/ollama/latest) -- Version and dependencies verified
-- [npm registry: @huggingface/transformers@3.8.1](https://registry.npmjs.org/@huggingface/transformers/latest) -- Version verified
-- [npm registry: @huggingface/inference@4.13.15](https://registry.npmjs.org/@huggingface/inference/latest) -- Version verified
-- [OpenCode docs: providers](https://opencode.ai/docs/providers/) -- Ollama configuration format
-- [OpenCode GitHub](https://github.com/anomalyco/opencode) -- v1.2.20, install instructions
-- [Claude Code docs: LLM gateway](https://code.claude.com/docs/en/llm-gateway) -- ANTHROPIC_BASE_URL configuration
-- [LM Studio blog: Claude Code integration](https://lmstudio.ai/blog/claudecode) -- Anthropic-compat endpoint (v0.4.1)
-- [Ollama Anthropic compatibility docs](https://docs.ollama.com/api/anthropic-compatibility) -- Supported/unsupported features
-- [Qualcomm: Ollama on Snapdragon](https://www.qualcomm.com/developer/project/ollama-with-windows-on-snapdragon-wos) -- ARM64 Windows compatibility
-- [Snapdragon X Elite LLM journey (community)](https://vcfvct.wordpress.com/2025/12/31/running-local-llms-on-a-snapdragon-x-elite-surface-laptop-7-my-journey-to-real-npu-acceleration/) -- NPU vs CPU real-world experience
-- [ONNX Runtime QNN EP docs](https://onnxruntime.ai/docs/execution-providers/QNN-ExecutionProvider.html) -- NPU Node.js support status
-- [Ollama GitHub issues #5360](https://github.com/ollama/ollama/issues/5360) -- Snapdragon NPU/GPU support tracking
-- [Best local coding models 2026](https://www.insiderllm.com/guides/best-local-coding-models-2026/) -- Model benchmarks and recommendations
-- [Promptfoo: Transformers.js provider](https://www.promptfoo.dev/docs/providers/transformers/) -- ONNX inference for LLM evaluation
+- [OpenCode docs: CLI](https://opencode.ai/docs/cli/) -- run command syntax, flags, non-interactive mode
+- [OpenCode docs: Providers](https://opencode.ai/docs/providers/) -- Ollama configuration format
+- [OpenCode GitHub releases](https://github.com/anomalyco/opencode/releases) -- v1.2.23 latest
+- [OpenCode ARM64 issue #4340](https://github.com/anomalyco/opencode/issues/4340) -- Windows ARM64 not supported
+- [OpenCode ARM64 issue #9678](https://github.com/anomalyco/opencode/issues/9678) -- Stopped working on ARM64
+- [OpenCode ARM64 issue #10302](https://github.com/anomalyco/opencode/issues/10302) -- Segfault on ARM64
+- [OpenCode non-interactive issue #10411](https://github.com/anomalyco/opencode/issues/10411) -- --non-interactive flag request
+- [Ollama docs: tool calling](https://docs.ollama.com/capabilities/tool-calling) -- Tool API reference
+- [Ollama docs: OpenCode integration](https://docs.ollama.com/integrations/opencode) -- Configuration guide
+- [Ollama blog: launch command](https://ollama.com/blog/launch) -- v0.15 ollama launch
+- [ollama/ollama-js GitHub](https://github.com/ollama/ollama-js) -- Official JS client
+- [ollama npm registry](https://www.npmjs.com/package/ollama) -- v0.6.3 latest
+- [Ollama VRAM requirements guide](https://localllm.in/blog/ollama-vram-requirements-for-local-llms) -- RAM estimation
+- [Qwen3 8B specs](https://apxml.com/models/qwen3-8b) -- Model parameters and memory
+- [Qwen3 official GitHub](https://github.com/QwenLM/Qwen3) -- Model capabilities, tool calling
+- [Qwen3 blog post](https://qwenlm.github.io/blog/qwen3/) -- Benchmark results, architecture
+- [Qwen3-Coder GitHub](https://github.com/QwenLM/Qwen3-Coder) -- Coder variant specs
+- [Ollama qwen3:8b model page](https://ollama.com/library/qwen3:8b) -- Download size, tags
+- [ollama-x-opencode setup guide](https://github.com/p-lemonish/ollama-x-opencode) -- Community integration guide
+- [Best Ollama models for tool calling 2026](https://clawdbook.org/blog/openclaw-best-ollama-models-2026) -- Model comparison
+- [Red Hat: Node.js Ollama tool use](https://developers.redhat.com/blog/2024/09/10/quick-look-tool-usefunction-calling-nodejs-and-ollama) -- Tool calling pattern
 
 ---
-*Stack research for: local LLM inference in Node.js/TypeScript skill evaluation framework*
-*Researched: 2026-03-08*
+*Stack research for: opencode CLI + Ollama agent backend additions to local-skill-eval v2.0*
+*Researched: 2026-03-10*

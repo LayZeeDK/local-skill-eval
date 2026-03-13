@@ -1,0 +1,31 @@
+{
+  "name": "qwen3.5-q8_0-confirmation",
+  "timestamp": "2026-03-11T11:21:31.059Z",
+  "modelfile": "modelfiles/qwen3.5-q8_0-skill-eval-agent.Modelfile",
+  "trials": [
+    {
+      "trial": 1,
+      "duration_s": 166.5,
+      "reward": 0.97,
+      "commands": 4
+    },
+    {
+      "trial": 2,
+      "duration_s": 165,
+      "reward": 0.97,
+      "commands": 4
+    },
+    {
+      "trial": 3,
+      "duration_s": 162.8,
+      "reward": 0.97,
+      "commands": 4
+    }
+  ],
+  "avg_duration_s": 164.8,
+  "std_dev_s": 1.9,
+  "avg_reward": 0.97,
+  "avg_commands": 4,
+  "target_met": true,
+  "reward_met": true
+}

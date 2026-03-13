@@ -64,7 +64,7 @@ function ollamaHealthOk(): MockRoute {
     };
 }
 
-function ollamaTagsWithModel(modelName: string = 'qwen2.5:3b'): MockRoute {
+function ollamaTagsWithModel(modelName: string = 'qwen3:4b'): MockRoute {
     return {
         method: 'GET',
         pathPattern: '/api/tags',
@@ -184,7 +184,7 @@ async function main() {
         assert(result === null, 'result should be null on connection error');
     });
 
-    await test('callOllama sends correct request body (model, prompt, stream:false, temperature:0, num_predict:512, JSON Schema format)', async () => {
+    await test('callOllama sends correct request body (model, prompt, stream:false, temperature:0, num_predict:512, checklist JSON Schema format)', async () => {
         let capturedBody: any = null;
 
         globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -194,7 +194,11 @@ async function main() {
                 capturedBody = JSON.parse(init.body as string);
 
                 return new Response(JSON.stringify({
-                    response: JSON.stringify({ score: 0.9, reasoning: 'Great' }),
+                    response: JSON.stringify({
+                        commands_found: ['superlint check'],
+                        criteria: [{ criterion: 'test', met: true }],
+                        reasoning: 'Great',
+                    }),
                     done: true,
                 }), { status: 200, headers: { 'Content-Type': 'application/json' } });
             }
@@ -206,16 +210,18 @@ async function main() {
         await (grader as any).callOllama('my test prompt', 'http://localhost:11434', config);
 
         assert(capturedBody !== null, 'request body should have been captured');
-        assert(capturedBody.model === 'qwen2.5:3b', `model should be qwen2.5:3b, got: ${capturedBody.model}`);
+        assert(capturedBody.model === 'qwen3:4b', `model should be qwen3:4b, got: ${capturedBody.model}`);
         assert(capturedBody.prompt === 'my test prompt', 'prompt should match');
         assert(capturedBody.stream === false, 'stream should be false');
+        assert(capturedBody.think === false, 'think should be false');
         assert(capturedBody.format !== undefined && capturedBody.format.type === 'object',
             `format should be JSON Schema object, got: ${JSON.stringify(capturedBody.format)}`);
-        assert(capturedBody.format.properties.score !== undefined, 'format should have score property');
+        assert(capturedBody.format.properties.commands_found !== undefined, 'format should have commands_found property');
+        assert(capturedBody.format.properties.criteria !== undefined, 'format should have criteria property');
         assert(capturedBody.format.properties.reasoning !== undefined, 'format should have reasoning property');
         assert(capturedBody.options.temperature === 0, `temperature should be 0, got: ${capturedBody.options.temperature}`);
         assert(capturedBody.options.num_predict === 512, `num_predict should be 512, got: ${capturedBody.options.num_predict}`);
-        assert(capturedBody.options.num_ctx === 8192, `num_ctx should be 8192, got: ${capturedBody.options.num_ctx}`);
+        assert(capturedBody.options.num_ctx === 4096, `num_ctx should be 4096, got: ${capturedBody.options.num_ctx}`);
     });
 
     // --- callOllamaWithRetry tests ---
@@ -352,13 +358,13 @@ async function main() {
 
             if (url === 'http://localhost:11434/api/tags') {
                 return new Response(JSON.stringify({
-                    models: [{ name: 'qwen2.5:3b' }],
+                    models: [{ name: 'qwen3:4b' }],
                 }), { status: 200, headers: { 'Content-Type': 'application/json' } });
             }
 
             if (url === 'http://localhost:11434/api/generate') {
                 return new Response(JSON.stringify({
-                    response: JSON.stringify({ score: 0.75, reasoning: 'Decent' }),
+                    response: JSON.stringify({ commands_found: ['superlint check'], score: 0.75, reasoning: 'Decent' }),
                     done: true,
                 }), { status: 200, headers: { 'Content-Type': 'application/json' } });
             }
@@ -491,7 +497,7 @@ async function main() {
         }
     });
 
-    await test('default model is qwen2.5:3b when config.model is undefined', async () => {
+    await test('default model is qwen3:4b when config.model is undefined', async () => {
         let capturedModel: string = '';
 
         globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -502,7 +508,7 @@ async function main() {
                 capturedModel = body.model;
 
                 return new Response(JSON.stringify({
-                    response: JSON.stringify({ score: 0.9, reasoning: 'OK' }),
+                    response: JSON.stringify({ commands_found: [], score: 0.9, reasoning: 'OK' }),
                     done: true,
                 }), { status: 200, headers: { 'Content-Type': 'application/json' } });
             }
@@ -512,7 +518,7 @@ async function main() {
 
         const config = makeConfig({ model: undefined });
         await (grader as any).callOllama('prompt', 'http://localhost:11434', config);
-        assert(capturedModel === 'qwen2.5:3b', `default model should be qwen2.5:3b, got: ${capturedModel}`);
+        assert(capturedModel === 'qwen3:4b', `default model should be qwen3:4b, got: ${capturedModel}`);
     });
 
     await test('config.model overrides default (e.g., config.model = "llama3.2:latest")', async () => {
@@ -552,7 +558,7 @@ async function main() {
 
             if (url === 'http://custom-host:11434/api/tags') {
                 return new Response(JSON.stringify({
-                    models: [{ name: 'qwen2.5:3b' }],
+                    models: [{ name: 'qwen3:4b' }],
                 }), { status: 200, headers: { 'Content-Type': 'application/json' } });
             }
 
@@ -586,9 +592,13 @@ async function main() {
 
     // --- warmUp tests ---
 
+    // Each warmUp test uses a unique model name because warmedModels is module-level
+    // state (not per-instance), so a model warmed in one test stays warm for later tests.
+
     await test('warmUp sends /api/generate with num_predict:1 and short prompt on first call', async () => {
         let capturedBody: any = null;
         const freshGrader = new LLMGrader();
+        const testModel = 'test-warmup-request:4b';
 
         globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
             const url = typeof input === 'string' ? input : input.toString();
@@ -605,18 +615,19 @@ async function main() {
             throw new Error(`Unexpected fetch: ${url}`);
         }) as typeof globalThis.fetch;
 
-        await (freshGrader as any).warmUp('http://localhost:11434', 'qwen2.5:3b');
+        await (freshGrader as any).warmUp('http://localhost:11434', testModel);
 
         assert(capturedBody !== null, 'warmUp should have sent a fetch request');
         assert(capturedBody.options.num_predict === 1, `num_predict should be 1, got: ${capturedBody.options?.num_predict}`);
         assert(capturedBody.prompt === 'hi', `prompt should be "hi", got: ${capturedBody.prompt}`);
         assert(capturedBody.stream === false, `stream should be false, got: ${capturedBody.stream}`);
-        assert(capturedBody.model === 'qwen2.5:3b', `model should be qwen2.5:3b, got: ${capturedBody.model}`);
+        assert(capturedBody.model === testModel, `model should be ${testModel}, got: ${capturedBody.model}`);
     });
 
-    await test('warmUp does NOT send request on second call (warmedUp flag prevents repeat)', async () => {
+    await test('warmUp does NOT send request on second call (module-level warmedModels prevents repeat)', async () => {
         let callCount = 0;
         const freshGrader = new LLMGrader();
+        const testModel = 'test-warmup-repeat:4b';
 
         globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
             const url = typeof input === 'string' ? input : input.toString();
@@ -633,14 +644,15 @@ async function main() {
             throw new Error(`Unexpected fetch: ${url}`);
         }) as typeof globalThis.fetch;
 
-        await (freshGrader as any).warmUp('http://localhost:11434', 'qwen2.5:3b');
-        await (freshGrader as any).warmUp('http://localhost:11434', 'qwen2.5:3b');
+        await (freshGrader as any).warmUp('http://localhost:11434', testModel);
+        await (freshGrader as any).warmUp('http://localhost:11434', testModel);
 
         assert(callCount === 1, `warmUp should have sent only 1 request, sent: ${callCount}`);
     });
 
     await test('warmUp failure (fetch throws) logs warning but does not throw -- grade() proceeds', async () => {
         const freshGrader = new LLMGrader();
+        const testModel = 'test-warmup-failure:4b';
 
         globalThis.fetch = (async () => {
             throw new Error('simulated network error');
@@ -650,7 +662,7 @@ async function main() {
         let threw = false;
 
         try {
-            await (freshGrader as any).warmUp('http://localhost:11434', 'qwen2.5:3b');
+            await (freshGrader as any).warmUp('http://localhost:11434', testModel);
         } catch {
             threw = true;
         }
@@ -699,6 +711,7 @@ async function main() {
     await test('warmUp timeout is 120000ms (verified via AbortSignal.timeout argument)', async () => {
         let capturedSignal: AbortSignal | undefined;
         const freshGrader = new LLMGrader();
+        const testModel = 'test-warmup-timeout:4b';
 
         globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
             const url = typeof input === 'string' ? input : input.toString();
@@ -715,7 +728,7 @@ async function main() {
             throw new Error(`Unexpected fetch: ${url}`);
         }) as typeof globalThis.fetch;
 
-        await (freshGrader as any).warmUp('http://localhost:11434', 'qwen2.5:3b');
+        await (freshGrader as any).warmUp('http://localhost:11434', testModel);
 
         assert(capturedSignal !== undefined, 'warmUp should pass a signal to fetch');
         // AbortSignal.timeout creates a signal -- we can check it exists

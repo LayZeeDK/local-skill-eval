@@ -1,387 +1,229 @@
 # Codebase Concerns
 
-**Analysis Date:** 2026-03-08
+**Analysis Date:** 2026-03-10
 
 ## Tech Debt
 
-### Race Condition in Parallel Trial Execution
-
-**Issue:** The parallel trial queue uses non-atomic `queue.shift()` without synchronization primitives.
-
-**Files:** `src/evalRunner.ts` (lines 149-154)
-
-**Impact:** Under high-concurrency scenarios (many workers, many trials), multiple workers could theoretically read the same trial index, causing duplicate executions or silent skips. This is a subtle bug that only manifests with specific timing. While JavaScript's event loop provides some protection, the code doesn't explicitly protect against this.
-
-**Fix approach:**
-- Replace the simple array queue with a proper async queue (e.g., `p-queue` or similar)
-- OR use a Mutex/Lock pattern with `async-lock` to protect `queue.shift()` calls
-- Add unit tests that stress-test parallel execution with 10+ workers and 100+ trials to catch race conditions
-
-
-### Base64 Encoding for Long Prompts May Fail on Windows
-
-**Issue:** Agent implementations use `echo '${b64}' | base64 -d` to decode prompts, which assumes bash is available and `base64` command works correctly.
-
-**Files:** `src/agents/claude.ts` (lines 10-11), `src/agents/gemini.ts` (lines 10-11)
-
-**Impact:** On Windows without WSL/Git Bash, or in restricted environments, the base64 decoding step may fail silently, causing agents to receive empty or corrupted instructions. The error is not explicitly handled; agents just log a message to stderr and continue with empty output.
-
-**Fix approach:**
-- Add explicit error handling to verify the `/tmp/.prompt.md` file exists and is readable before proceeding
-- Consider writing prompts to a proper temp file using Node APIs instead of shell roundtrip
-- Add tests that verify prompt integrity after the base64 encode/decode cycle
-
-
-### Insufficient Error Handling in Docker Build Failures
-
-**Issue:** Docker build errors (lines 33-40 in `docker.ts`) catch only formatted error responses but may not handle network failures, image registry issues, or daemon crashes.
-
-**Files:** `src/providers/docker.ts` (lines 27-40)
-
-**Impact:** If Docker daemon is unavailable or network fails mid-build, the error message may be cryptic. The code throws but doesn't provide hints for recovery (e.g., "docker ps failed" doesn't suggest "is Docker running?").
-
-**Fix approach:**
-- Add specific error detection for common Docker issues (connection refused, image not found, no space)
-- Provide actionable error messages with troubleshooting suggestions
-- Add a `diagnose()` helper for Docker setup validation
-
-
-### Unhandled Promise Rejection in Docker Container Cleanup
-
-**Issue:** `tmpContainer.kill().catch(() => {})` and `tmpContainer.remove()` suppress all errors without logging.
-
-**Files:** `src/providers/docker.ts` (lines 74-75)
-
-**Impact:** If container cleanup fails due to permissions or Docker issues, the error is silently ignored. Over many trials, zombie containers accumulate, consuming disk space and eventually breaking future builds.
-
-**Fix approach:**
-- Log suppressed errors at debug level
-- Add container list check in `diagnose()` to detect stale containers
-- Consider retry logic with exponential backoff before giving up
-
-
-## Known Bugs
-
-### Parallel Execution Queue Unsynchronized
-
-**Symptoms:** When running with `--parallel=N` where N > 1, occasionally trials are skipped or results appear out of order. With many trials, some trials don't execute at all.
-
-**Files:** `src/evalRunner.ts` (lines 146-158)
-
-**Trigger:** Run `npm run eval -- superlint --parallel=8 --trials=20` multiple times. Observe trial counts occasionally less than 20.
-
-**Current mitigation:** None. The code assumes JavaScript's single-threaded event loop prevents interleaving, but the non-atomic read-then-shift pattern is fundamentally racy.
-
-**Workaround:** Use `--parallel=1` (the default) for correctness, accept lower throughput.
-
-
-### LLM Grader JSON Extraction is Too Permissive
-
-**Symptoms:** LLM grader accepts any JSON-like structure with a `score` field, even if the LLM didn't actually follow instructions. Malformed responses (missing `reasoning`, negative scores, non-numeric values) are coerced to 0 without warning.
-
-**Files:** `src/graders/index.ts` (lines 192-210)
-
-**Trigger:** LLM response: `{"score": -0.5}` or `{"score": "NaN"}` parses without error.
-
-**Workaround:** Rubric instructions should be explicit about JSON format. No runtime validation of response schema.
-
-**Fix approach:**
-- Add JSON schema validation (use `zod` or similar)
-- Return error details instead of silently coercing invalid values
-- Add test cases for malformed LLM responses
-
-
-### Secret Redaction Only Works for Env Var Values
-
-**Symptoms:** If a secret appears in the instruction text or command output but was never passed as an env var, it won't be redacted.
-
-**Files:** `src/evalRunner.ts` (lines 299-330)
-
-**Impact:** If a task's `instruction.md` accidentally contains a hardcoded API key, it leaks into logs.
-
-**Fix approach:**
-- Add a secrets config file (JSON or TOML) that lists patterns to redact
-- Use a more sophisticated redaction strategy (regex patterns, known secret formats)
-- Add a pre-eval check that scans instruction files for likely secrets
-
-
-## Security Considerations
-
-### API Key Exposure in LLM Grader Calls
-
-**Risk:** Grader API keys (GEMINI_API_KEY, ANTHROPIC_API_KEY) are passed through environment and used in unencrypted HTTP calls.
-
-**Files:** `src/graders/index.ts` (lines 128-142, 145-165, 167-189)
-
-**Current mitigation:** API calls are made over HTTPS; keys are stored in process.env (not logged).
-
-**Recommendations:**
-- Add request/response logging at DEBUG level only (log request structure, not bodies with keys)
-- Use the official SDKs instead of raw fetch() to ensure proper security practices
-- Document that prod deployments should use API key rotation and auditing
-- Consider using short-lived tokens if the LLM providers support them
-
-
-### Shell Injection Risk in Command Execution
-
-**Risk:** Commands passed to `runCommand()` are executed via `/bin/bash -c`, which is vulnerable if the command string is constructed from untrusted input.
-
-**Files:** `src/providers/docker.ts` (line 184), `src/evalRunner.ts` (various grader commands)
-
-**Current mitigation:** Commands are generated internally, not from user input. However, grader commands from task.toml are read from files.
-
-**Recommendations:**
-- Document that task.toml commands must come from trusted sources
-- Consider a whitelist/sandbox mode that only allows specific safe commands
-- Add input validation to reject commands with shell metacharacters if used programmatically
-
-
-### Temp Directory Permission Issues
-
-**Risk:** Temporary files created in `/tmp` (or `os.tmpdir()` on Windows) may be world-readable, exposing secrets if not cleaned up quickly.
-
-**Files:** `src/providers/local.ts` (line 9), `src/agents/claude.ts` (line 11)
-
-**Current mitigation:** Temp dirs are cleaned up after trial completion; prompt files are in `/tmp/.prompt.md` (world-readable).
-
-**Recommendations:**
-- Create temp dirs with restricted permissions (mode 0700)
-- Use `mkdtemp()` with explicit mode instead of manual directory creation
-- Consider in-memory storage for short-lived prompts instead of temp files
-
-
-## Performance Bottlenecks
-
-### Docker Image Rebuild on Every Prepare() Call
-
-**Problem:** If `prepare()` is called multiple times (though currently not, it could happen in future refactors), each call rebuilds the image from scratch, wasting CPU/time.
-
-**Files:** `src/providers/docker.ts` (lines 21-85)
-
-**Cause:** No caching mechanism for built images beyond the single `preparedImage` field.
-
-**Improvement path:**
-- Add image hash caching to `.planning/docker-cache/` with metadata
-- Reuse images across multiple task runs if Dockerfile hasn't changed
-- Add `--no-cache` flag option to force rebuilds when needed
-
-
-### Token Estimation is Inaccurate
-
-**Problem:** Token counting uses a fixed 4 chars/token heuristic, which is off by 30-50% for typical LLM use (actual: ~3.5 chars for GPT, ~4-5 for others).
-
-**Files:** `src/evalRunner.ts` (lines 63-66)
-
-**Impact:** Reports show wildly inaccurate token consumption, making cost estimates unreliable.
-
-**Improvement path:**
-- Use official token counters from Anthropic/Google SDKs if available
-- Fall back to a more accurate heuristic based on tokenizer libraries
-- Document the limitation and add a "~" prefix to reported token counts
-
-
-### Full Session Log Serialization for Every Trial
-
-**Problem:** Large session logs (100+ commands, thousands of lines of output) are serialized to JSON and saved to disk for every trial. With 100 trials, this becomes 100+ MB of mostly redundant data.
-
-**Files:** `src/evalRunner.ts` (lines 129-132, 332-341), CLI reporter
-
-**Improvement path:**
-- Store full logs in a separate archive (tar.gz)
-- Keep summary metadata in JSON (trial ID, reward, grader scores)
-- Add `--full-logs=false` option to skip detailed logging
-- Compress logs before saving
-
-
-## Fragile Areas
-
-### Docker Provider Depends on Specific Container Setup
-
-**Files:** `src/providers/docker.ts`
-
-**Why fragile:** The code assumes:
-- Container starts with `tail -f /dev/null` (lines 46, 103)
-- Skill injection paths exist as `/workspace/.agents/skills` and `/workspace/.claude/skills` (lines 52)
-- Commands run via `/bin/bash -c` with TTY=true (lines 184, 191)
-
-**Safe modification:** Before changing container startup, verify:
-1. Container stays alive long enough for shell invocation
-2. File ownership/permissions allow skill injection
-3. TTY mode doesn't break command parsing (can cause color codes in output)
-
-**Test coverage gaps:**
-- No integration test that verifies skill injection actually worked (only checks exit code)
-- No test for large output (>1MB), which may cause buffer issues with TTY mode
-- No test for commands that fork (e.g., `&` background processes)
-
-
-### LLM Grader Transcript Building is Fragile
-
-**Files:** `src/graders/index.ts` (lines 78-113)
-
-**Why fragile:**
-- Assumes specific entry types in session_log (`agent_start`, `command`, `agent_result`)
-- If a future change adds new log entry types, they're silently ignored
-- String concatenation without escaping could cause formatting issues
-- Transcript order is implicit; if logging order changes, LLM sees different context
-
-**Safe modification:**
-- Add `sessionLog` type validation before building transcript
-- Document the expected session_log schema
-- Add unit tests that mock different session_log structures
-
-**Test coverage gaps:**
-- No test for missing/empty fields (e.g., agent result without output)
-- No test for very large transcripts (>100KB)
-- No test for non-ASCII characters in command output
-
-
-## Scaling Limits
-
-### Parallel Worker Pool is Fixed Size
-
-**Current capacity:** Memory: ~N * (workspace size + log buffers) where N = parallel workers
-
-**Limit:** With 10 concurrent workers running 2GB Docker containers, memory usage = 20GB. Typical dev machine has 16GB, so `--parallel=10` OOMs.
-
-**Scaling path:**
-- Add dynamic pool size based on available memory
-- Implement work-stealing to prioritize finishing current trial before starting next
-- Add trial queuing to limit in-flight workload
-
-
-### Filesystem-Based Result Persistence
-
-**Current capacity:** Results directory can hold 1000s of JSON files before listing becomes slow (~1MB per report).
-
-**Limit:** `fs.readdir(resultsDir)` in preview (lines 47-50 in `cli.ts`) becomes O(N) slow. Listing 10k+ files takes seconds.
-
-**Scaling path:**
-- Move to a proper database (SQLite for local, PostgreSQL for production)
-- Implement pagination in the preview viewer
-- Add result filtering by date/task/agent to reduce working set
-
-
-## Dependencies at Risk
-
-### No Pinned Versions for Critical Dependencies
-
-**Risk:** `dockerode@^4.0.9`, `fs-extra@^11.3.3`, `toml@^3.0.0` use caret ranges, allowing minor/patch updates that could introduce breaking changes.
-
-**Files:** `package.json` (lines 30-34)
-
-**Impact:** `npm install` on a future date may pull breaking changes from upstream.
-
-**Migration plan:**
-- Lock all dependencies to exact versions (remove `^` and `~`)
-- Use `npm audit` regularly to catch security updates
-- Use Dependabot to automate dependency updates with CI checks
-
-
-### TypeScript Version Mismatch with Node 24
-
-**Risk:** TypeScript `^5.9.3` may not have full support for Node 24's latest APIs. `ts-node` compatibility with newest Node versions can be flaky.
-
-**Files:** `package.json` (lines 18-19, 27-28)
-
-**Current mitigation:** Project uses `ts-node` which handles compilation on-the-fly.
-
-**Recommendations:**
-- Test with Node 24 explicitly (add CI test for `node --version >= 24.0`)
-- Consider moving to native TypeScript compilation (esbuild, tsc) for faster startup
-- Keep TypeScript within one major version of latest
-
-
-## Missing Critical Features
-
-### No Progress Reporting for Long-Running Evals
-
-**Problem:** When running 100 trials with `--parallel=1`, the user gets no indication of progress for hours. Only the final summary appears.
-
-**Blocks:** User can't estimate how long to wait or detect hangs.
-
-**Fix approach:**
-- Add a simple progress bar using `cli-progress` or similar
-- Report every 10% completion or every 5 seconds
-- Log which trial is currently running
-
-
-### No Interrupt Handler for Graceful Shutdown
-
-**Problem:** If user hits Ctrl+C mid-eval, resources (Docker containers, temp files) may not be cleaned up properly.
-
-**Files:** `src/evalRunner.ts` (no signal handlers), `src/cli.ts` (no graceful shutdown)
-
-**Blocks:** Containers accumulate; temp directories persist.
-
-**Fix approach:**
-- Add process-level signal handlers for SIGINT/SIGTERM
-- Implement a "cancel" mechanism in EvalRunner
-- Ensure teardown() is always called, even on interrupt
-
-
-## Test Coverage Gaps
-
-### Insufficient Error Path Testing
-
-**What's not tested:**
-- Docker build failure scenarios (registry timeout, disk full, permission denied)
-- LLM API failures (timeout, 429, 500 errors)
-- Command execution with non-zero exit codes and stderr
-- Malformed task.toml files
-- Missing grader rubric files
-
-**Files:** `tests/bootstrap.test.ts` only tests happy path.
-
-**Risk:** Errors encountered in production are untested and may cause confusing failures.
-
-**Priority:** High
-
-**Approach:**
-- Add `tests/errors.test.ts` covering Docker, LLM, and command failures
-- Mock failing API responses using `jest` or `sinon`
-- Test each provider (Docker, Local) with simulated failures
-
-
-### No Stress Testing for Parallel Execution
-
-**What's not tested:**
-- High concurrency (8+ workers, 50+ trials)
-- Race condition detection
-- Memory usage under load
-- Container cleanup with fast/slow trial completion times
-
-**Files:** `tests/bootstrap.test.ts` only runs sequential tests (lines 95-102).
-
-**Risk:** `--parallel=N` may have subtle bugs that only appear under heavy load.
-
-**Priority:** High
-
-**Approach:**
-- Add `tests/stress.test.ts` with parameterized concurrency levels
-- Use a "result deduplication" check to verify no trials run twice
-- Monitor memory/process count during test
-
-
-### No Grader Output Validation Tests
-
-**What's not tested:**
-- LLM grader with malformed JSON responses
-- LLM grader with missing fields (no `score`, no `reasoning`)
-- Deterministic grader with invalid reward file (non-numeric, out-of-range)
-- Multiple graders with conflicting scores
-
-**Files:** `tests/` has no grader-specific tests.
-
-**Risk:** Grader failures silently default to 0 score, hiding actual issues.
-
-**Priority:** Medium
-
-**Approach:**
-- Add `tests/graders.test.ts` with mocked LLM responses
-- Test each grader type independently
-- Verify error messages are clear and actionable
+**Hardcoded Ollama timeout in grader:**
+- Issue: `OLLAMA_TIMEOUT_MS` is a compile-time constant (`120_000` ms) in `callOllama()`. There is no `timeout` field in `GraderConfig` and no way to configure this from `task.toml`. Known-documented issue: on Snapdragon X Elite ARM64 CPU, `qwen3:4b` (a thinking model) takes ~400–500 s per inference, meaning the 120 s timeout fires every time. The older timeout of 300 s was also insufficient. See `.planning/debug/ollama-grader-score-zero-arm64.md`.
+- Files: `src/graders/index.ts` (line ~293: `const OLLAMA_TIMEOUT_MS = 120_000`)
+- Impact: LLM grader silently returns `score: 0` on slow hardware, with no user-visible reason in the trial summary. The `details` field contains the explanation but `evalRunner.ts` only prints `details` for sub-0.5 scores — not for error cases.
+- Fix approach: Add optional `timeout_sec` field to `GraderConfig` in `src/types.ts`; fall back to a configurable default. Expose it in `task.toml` per grader stanza.
+
+**Token estimation is a rough approximation:**
+- Issue: `estimateTokens()` in `src/evalRunner.ts` (line ~64) uses a fixed 4 chars/token heuristic (`Math.ceil(text.length / 4)`). This is documented as "standard GPT heuristic" but diverges significantly for code-heavy outputs (lower token density) and non-English text (higher token density). The resulting `input_tokens` / `output_tokens` fields in `TrialResult` are labeled as "estimated" in the CLI output.
+- Files: `src/evalRunner.ts` (lines 63–66, 243–246)
+- Impact: Analytics and cost projections that rely on `TrialResult.input_tokens` / `output_tokens` are unreliable. Pass-rate metrics are unaffected.
+- Fix approach: Use a proper tokenizer (e.g., `tiktoken` via npm) or make the estimate label more prominent. Low priority unless token accounting becomes a product requirement.
+
+**`sessionLog` typed as `any[]` in grader interface:**
+- Issue: `Grader.grade()` in `src/graders/index.ts` (line 12) accepts `sessionLog: any[]`. The correct type is `LogEntry[]` from `src/types.ts`. This defeats TypeScript's structural checks for any code that reads `sessionLog` entries inside graders.
+- Files: `src/graders/index.ts` (lines 6–14), `src/types.ts`
+- Impact: No runtime bug, but type errors in graders that access session log fields are silently missed. Requires callers to cast or use optional chaining defensively.
+- Fix approach: Change parameter type to `LogEntry[]` in the `Grader` interface and all implementations.
+
+**`toml` imported via `require()` inside a function:**
+- Issue: In `src/cli.ts` (line ~100), `toml` is loaded with `const toml = require('toml')` inside the `main()` function's suite-loading branch instead of at the module top level with a static `import`. The rest of the file uses ES-style imports (including `toml` in `evalRunner.ts`).
+- Files: `src/cli.ts` (line ~100)
+- Impact: Inconsistent module loading style; the dynamic `require` bypasses TypeScript's type import for this code path. Not a functional bug.
+- Fix approach: Move to a top-level `import * as toml from 'toml'` consistent with the rest of the codebase.
+
+**`dist/` directory committed to version control:**
+- Issue: The compiled JavaScript output in `dist/` is tracked by git and present in the repository. There is no `.gitignore` entry for `dist/`. This means every `npm run build` produces a diff that must be staged and committed, or diverges silently.
+- Files: `dist/` (all files), `.gitignore`
+- Impact: Repository size grows with every build. CI artifacts differ from source-of-truth TypeScript. Merge conflicts on generated files are painful.
+- Fix approach: Add `dist/` to `.gitignore`. Update CI to build before running tests (already done: `build` job exists in `.github/workflows/ci.yml`).
+
+**`pass@k` and `pass^k` computed at `k = numTrials` always:**
+- Issue: In `src/evalRunner.ts` (lines 121–124), `calculatePassAtK` and `calculatePassPowK` are called with `k = numTrials`. This means both metrics are computed for the specific number of trials run, not for an independently chosen `k`. Running 3 trials gives `pass@3`, not `pass@1`, `pass@3`, and `pass@5`. The metrics are valid but not the standard "k-shot" sweep seen in ML benchmarks.
+- Files: `src/evalRunner.ts` (lines 121–124)
+- Impact: Results cannot be directly compared to published `pass@1`, `pass@5`, `pass@10` benchmarks without re-running. Analytics script has no way to compute other `k` values from existing reports.
+- Fix approach: Compute the full `pass@k` series (k=1..n) and include all values in `EvalReport`, or accept the current behavior and document the limitation clearly.
+
+**`success` threshold hardcoded at `>= 0.5`:**
+- Issue: In `src/evalRunner.ts` (line 118), `const successes = trials.filter(t => t.reward >= 0.5).length` uses a hardcoded 0.5 pass threshold. This threshold also appears in `src/reporters/cli.ts` (reward coloring), `src/reporters/browser.ts` (implicit), and `src/cli.ts` (validation check at line 170).
+- Files: `src/evalRunner.ts` (line 118), `src/cli.ts` (line 170), `src/reporters/cli.ts` (line 100)
+- Impact: No way to configure per-task pass thresholds (e.g., a task requiring `>= 0.8` to pass). Duplication across files creates drift risk when the threshold needs changing.
+- Fix approach: Add optional `pass_threshold` to `TaskConfig` in `src/types.ts`. Default to 0.5. Pass through `EvalRunner`.
+
+**Docker image cache key mismatch between workflow and application code:**
+- Issue: `skill-eval.yml` (lines 50–51) computes the Docker cache key using `find tasks/superlint_demo -type f | sort | xargs sha256sum | sha256sum | cut -c1-16` — a workflow-level hash. `DockerProvider.prepare()` in `src/providers/docker.ts` computes its own content hash via `computeContextHash()` using SHA-256 over file paths and contents. The two hashes use different algorithms, include different path namespaces, and produce different values. A cache hit in the workflow does not guarantee the application will reuse its own cached image name.
+- Files: `.github/workflows/skill-eval.yml` (lines 50–51), `src/providers/docker.ts` (lines 33–68)
+- Impact: The workflow's `actions/cache` layer may load a stale image that `DockerProvider` then rebuilds from scratch because the image name computed by the app doesn't match the loaded image. Doubles Docker build time on CI instead of eliminating it.
+- Fix approach: Expose `computeContextHash()` as a CLI utility (or use it directly in the workflow via `node -e`) so both the workflow cache key and the application image name derive from the same hash.
 
 ---
 
-*Concerns audit: 2026-03-08*
+## Known Bugs
+
+**LLM grader silently returns `score: 0` on timeout with no user-visible reason:**
+- Symptoms: `llm_rubric` grader shows `0.00` in trial summary; no error is displayed in the trial table; deterministic grader may pass.
+- Files: `src/graders/index.ts` (lines 287–335, `callOllama`), `src/evalRunner.ts` (lines 251–255, grader detail printing)
+- Trigger: Ollama inference takes longer than `OLLAMA_TIMEOUT_MS` (currently `120_000` ms). Reproducible with any "thinking" model (e.g., `qwen3:4b`) on CPU-only hardware.
+- Workaround: Run with cloud fallback keys (`GEMINI_API_KEY` or `ANTHROPIC_API_KEY`), or use a non-thinking model (`qwen2.5:3b`, `phi3.5:3.8b-mini-instruct-q4_K_M`) that completes within the timeout.
+
+**`DockerProvider.runCommand()` merges stdout and stderr into a single stream:**
+- Symptoms: `CommandResult.stderr` is always an empty string `''` for Docker-executed commands; all output (including error output) appears in `CommandResult.stdout`.
+- Files: `src/providers/docker.ts` (lines 239–267)
+- Trigger: Docker exec is started with `Tty: true`. TTY mode merges stdout and stderr at the PTY level. The `LocalProvider` correctly separates them via separate `child.stdout` and `child.stderr` data handlers.
+- Workaround: None — Docker provider users cannot distinguish between stdout and stderr. Graders that use `result.stderr` to detect errors will not work as expected with `DockerProvider`.
+
+**Parallel trial execution has a shared mutable queue race condition:**
+- Symptoms: In theory, two workers in `runTrialsParallel()` could read the same index from the queue if `queue.shift()` is not atomic. In practice, JavaScript's single-threaded event loop makes this safe for in-process concurrency — but only because all workers are async, not true threads.
+- Files: `src/evalRunner.ts` (lines 137–158, `runTrialsParallel`)
+- Trigger: Not a practical bug with async JS. Would become a real bug if the code were ported to worker threads or another runtime.
+- Workaround: N/A for current runtime. Document the assumption.
+
+---
+
+## Security Considerations
+
+**Secret injection via `env` Record leaks through `LocalProvider.runCommand` process environment:**
+- Risk: `LocalProvider.runCommand()` in `src/providers/local.ts` (lines 104–115) merges `process.env` with the caller-supplied `env` object and passes the result to the child shell as `childEnv`. Any secret in `env` (e.g., `ANTHROPIC_API_KEY`) is exposed to the agent command and to all child processes it spawns, including potentially untrusted task scripts.
+- Files: `src/providers/local.ts` (lines 99–145)
+- Current mitigation: `EvalRunner.sanitize()` in `src/evalRunner.ts` (lines 305–336) redacts `env` values from saved reports. However, the secrets are still present in the live process environment during execution.
+- Recommendations: Pass only the specific environment variables required by each command. Do not pass all of `process.env` to untrusted task scripts. Consider a denylist of high-value variables (e.g., `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`) that are explicitly blocked from agent subprocess scope.
+
+**`/api/report` endpoint in browser viewer performs no path traversal protection:**
+- Risk: `src/reporters/browser.ts` (lines 25–34) reads a file from `resultsDir` based on a user-supplied `file` query parameter. It uses `path.join(resolved, file)` with no sanitization. An attacker with local network access to port 3847 could supply `file=../../src/cli.ts` to read arbitrary files reachable from the server process.
+- Files: `src/reporters/browser.ts` (lines 25–34)
+- Current mitigation: Server binds to `localhost` only (implicit from `server.listen(PORT)`). Exposure is limited to local network or localhost.
+- Recommendations: Validate that the resolved file path starts with `resolved` (the results directory) before serving. Use `path.resolve()` and check `filePath.startsWith(resolved)`.
+
+**`ClaudeAgent` and `GeminiAgent` pipe instruction via base64 through a temp file at `/tmp/.prompt.md`:**
+- Risk: Both agents in `src/agents/claude.ts` (line 11) and `src/agents/gemini.ts` (line 11) write the decoded instruction to `/tmp/.prompt.md`. This is a fixed, predictable path. In a shared multi-user environment, another process could read or overwrite this file between the write and the CLI invocation.
+- Files: `src/agents/claude.ts` (lines 10–12), `src/agents/gemini.ts` (lines 10–12)
+- Current mitigation: Inside Docker containers, `/tmp` is container-private. In `LocalProvider`, `/tmp` is the host system's shared temp directory.
+- Recommendations: Use a unique temp file per trial (e.g., `/tmp/.prompt-${trialId}-${Date.now()}.md`) to avoid cross-trial or cross-process collisions.
+
+---
+
+## Performance Bottlenecks
+
+**Ollama grader performs 2 HTTP round-trips (health + tags) before every grading call:**
+- Problem: `checkOllamaAvailability()` in `src/graders/index.ts` (lines 248–285) fetches `${ollamaHost}/` and `${ollamaHost}/api/tags` on every `grade()` call. For a 5-trial evaluation with one LLM grader, this adds 10 unnecessary health checks after the first successful check.
+- Files: `src/graders/index.ts` (lines 248–285)
+- Cause: No caching of availability status across `grade()` calls. The `LLMGrader` instance is created fresh per grader type lookup (`getGrader()` in `evalRunner.ts` line 217).
+- Improvement path: Cache the availability check result on the `LLMGrader` instance (similar to the `warmedUp` flag pattern already used). Re-check only on connection failure.
+
+**`AnalyticsEngine.loadReports()` reads all JSON files into memory simultaneously:**
+- Problem: `src/analytics/engine.ts` (lines 26–38) reads every `.json` file in `results/` into an in-memory array before aggregating. The `results/` directory already has 13 report files committed to the repository.
+- Files: `src/analytics/engine.ts` (lines 26–38)
+- Cause: Synchronous sequential reads with no streaming or pagination.
+- Improvement path: Stream-process reports in batches. Low priority until report count exceeds ~100 files.
+
+**`createTarFromDir()` buffers entire tar archive in memory before sending to Docker:**
+- Problem: `DockerProvider.createTarFromDir()` in `src/providers/docker.ts` (lines 219–237) collects all chunks into a `Buffer[]` array and concatenates them before returning. For large skill directories, this loads the entire archive into Node.js heap.
+- Files: `src/providers/docker.ts` (lines 219–237)
+- Cause: `dockerode`'s `putArchive()` accepts a `Buffer` or `Stream`. Using a stream would allow backpressure.
+- Improvement path: Return the `tar-stream` pack stream directly instead of buffering to a `Buffer`. Low priority until skill directories grow large.
+
+---
+
+## Fragile Areas
+
+**`LLMGrader` warmup and warning flags are instance-level state:**
+- Files: `src/graders/index.ts` (lines 57–59: `warnedAboutConfig`, `warmedUp`)
+- Why fragile: Both flags are per-`LLMGrader` instance. `getGrader()` creates a new instance on every call (line 436). This means `warnedAboutConfig` and `warmedUp` reset to `false` for every trial's grading call, so the warmup request is sent once per trial, not once per evaluation run.
+- Safe modification: If this is intentional (warmup per trial), document it. If the intent was "once per evaluation," move the `LLMGrader` instance outside `getGrader()` and reuse it across trials — or pass a shared instance through `EvalRunner`.
+- Test coverage: `tests/ollama-grader.test.ts` tests warmup idempotency on a single instance but does not test the `getGrader()` factory path.
+
+**`loadTaskConfig()` silently coerces legacy `[verifier]` format to graders:**
+- Files: `src/evalRunner.ts` (lines 10–25)
+- Why fragile: The normalization `if (!raw.graders && raw.verifier)` injects a hardcoded `command: 'bash tests/test.sh'` and `weight: 1.0`. If a legacy task's `test.sh` is not at that exact path, or if the weight should differ, the coercion silently produces wrong grader config with no warning. `raw` is untyped (`any`) from `toml.parse()`, so the fallback is not type-checked.
+- Safe modification: Add a `console.warn()` when the legacy format is detected. Validate the normalized result against the `TaskConfig` interface before returning.
+- Test coverage: No test covers the `[verifier]` legacy coercion path.
+
+**`DockerProvider.setup()` falls back to calling `prepare()` inline:**
+- Files: `src/providers/docker.ts` (lines 168–172)
+- Why fragile: If `prepare()` was never called (e.g., `EvalRunner` is used directly without the `prepare` step), `setup()` silently calls `prepare()` itself. This means the image is built during the first trial instead of before trials begin. If `prepare()` throws mid-trial, the trial fails and `cleanup()` is called on a workspace that was never fully set up.
+- Safe modification: Throw a clear error if `this.preparedImage` is undefined and `setup()` is called — or document that this lazy-init path is intentional and covered.
+- Test coverage: `tests/bootstrap.test.ts` tests Docker with the full `EvalRunner` path but does not test `setup()` called before `prepare()`.
+
+**Browser viewer server never closes:**
+- Files: `src/reporters/browser.ts` (lines 42–46)
+- Why fragile: `server.listen()` is called with no mechanism to close the server. In CI (`npm run preview` in `skill-eval.yml`), the process hangs after printing the URL because the HTTP server keeps the event loop alive. The CI job only completes because the `if: always()` step has the 30-minute job timeout as a hard ceiling.
+- Safe modification: Add a `--once` flag or a `SIGINT` handler that closes the server. For CI use, add a `--ci` flag that prints available report paths to stdout and exits immediately without starting an HTTP server.
+- Test coverage: No test exists for `browser.ts`.
+
+---
+
+## Scaling Limits
+
+**Single task definition (`superlint_demo`):**
+- Current capacity: 1 task, 1 suite (`suites/workflow.toml`).
+- Limit: The CLI, validation scripts, and suite config all reference `superlint_demo` by name. There is no templating or generator for new tasks.
+- Scaling path: Add a task creation guide and template directory. The framework architecture supports N tasks — the gaps are documentation and tooling.
+
+**Results directory grows unbounded:**
+- Current capacity: 13 result JSON files already committed to the repo.
+- Limit: No rotation, pruning, or archiving. `loadReports()` reads all files on every `npm run analyze`.
+- Scaling path: Add a `--limit=N` flag to `analyze.ts`. Consider moving results to `.gitignore` or a separate `results/` subdirectory that is not committed.
+
+---
+
+## Dependencies at Risk
+
+**`toml` package (v3.0.0) is unmaintained:**
+- Risk: The `toml` package has not had a release since 2015. It is a pure parser with no active maintenance. Edge cases in TOML spec (multi-line strings, datetime, nested arrays) may not parse correctly.
+- Impact: `loadTaskConfig()` and `src/cli.ts` both depend on it for all task and suite config parsing.
+- Migration plan: Replace with `smol-toml` (actively maintained, spec-compliant) or `@ltd/j-toml`. Both are drop-in compatible for the current TOML syntax used in `task.toml` and suite files.
+
+**`dockerode` bound to Docker API version assumptions:**
+- Risk: `dockerode@4.0.9` communicates with the Docker daemon via the Docker Engine API. Significant Docker Desktop version upgrades (e.g., moving to Docker Engine v28+) may change API behavior for exec streams, particularly the `Tty: true` stream demuxing behavior relied upon in `runCommand()`.
+- Impact: `DockerProvider.runCommand()` would silently return garbled output.
+- Migration plan: Monitor `dockerode` releases. Add an integration test that verifies the stdout/stderr split behavior after Docker Desktop upgrades.
+
+---
+
+## Missing Critical Features
+
+**No per-task configurable LLM grader timeout:**
+- Problem: `OLLAMA_TIMEOUT_MS` is hardcoded at `120_000` ms. Tasks that require complex reasoning (larger transcripts, multi-step agent outputs) may need longer timeouts; simple tasks could use shorter ones to fail fast.
+- Blocks: Using thinking models (e.g., `qwen3:4b`) reliably on CPU hardware; adding tasks with longer expected grading times.
+
+**No model setup / preflight check script:**
+- Problem: There is no `npm run setup` or equivalent that verifies Ollama is running, the required model (`qwen2.5:3b` by default) is pulled, and Docker is available. First-time users encounter cryptic failures.
+- Blocks: Smooth developer onboarding; CI setup documentation.
+
+**No path traversal protection in browser viewer:**
+- Problem: `src/reporters/browser.ts` serves arbitrary files from `resultsDir` without path sanitization (see Security Considerations above).
+- Blocks: Safe exposure of the viewer on any network beyond strict localhost.
+
+---
+
+## Test Coverage Gaps
+
+**Legacy `[verifier]` → `[[graders]]` coercion path:**
+- What's not tested: The backward-compatibility normalization in `loadTaskConfig()` at `src/evalRunner.ts` (lines 16–23) that converts old `[verifier]` format to the new `[[graders]]` format.
+- Files: `src/evalRunner.ts` (lines 10–25)
+- Risk: A malformed coercion would silently run the wrong grader command (hardcoded `bash tests/test.sh`) or wrong weight.
+- Priority: Low — the legacy format is not used by any current task.
+
+**`browser.ts` reporter is completely untested:**
+- What's not tested: HTTP server creation, `/api/reports` endpoint, `/api/report` endpoint, path traversal vulnerability, server lifecycle.
+- Files: `src/reporters/browser.ts`
+- Risk: Path traversal exploit (see Security Considerations). Silent regressions in report serving.
+- Priority: Medium — the path traversal gap alone warrants a basic test.
+
+**`cli.ts` argument parsing and suite loading:**
+- What's not tested: `--suite` flag, `--validate` flag, `--no-skills` flag, ambiguous task prefix matching, missing task error handling.
+- Files: `src/cli.ts`
+- Risk: Flag parsing regressions go undetected. Suite loading errors produce unhelpful messages.
+- Priority: Low — these are thin CLI wrappers over tested core logic.
+
+**`DockerProvider.prepare()` cache-hit path:**
+- What's not tested: The code path in `prepare()` where the image already exists in Docker cache (lines 94–99 in `docker.ts`). `docker-cache.test.ts` tests the hash function but not the Docker image existence check.
+- Files: `src/providers/docker.ts` (lines 84–162)
+- Risk: Cache-hit path regression (image reuse silently broken) would cause every evaluation to rebuild the Docker image.
+- Priority: Medium — regression would be expensive in CI time.
+
+**`EvalRunner` error handling and trial failure paths:**
+- What's not tested: The `catch` block in `runSingleTrial()` (lines 267–299 in `evalRunner.ts`) that handles agent timeouts and unexpected exceptions. The diagnostics capture path (`provider.diagnose()`) is also untested.
+- Files: `src/evalRunner.ts` (lines 267–302)
+- Risk: Error handling regressions produce misleading trial results or crashes that skip cleanup.
+- Priority: Medium — error paths are the hardest to debug in production.
+
+---
+
+*Concerns audit: 2026-03-10*

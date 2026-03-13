@@ -4,16 +4,14 @@ import * as path from 'path';
 import * as fs from 'fs';
 
 /**
- * Model name used by opencode. Uses qwen3:1.7b because:
- * - 2x faster than qwen3:4b (50 vs 22 tok/s at 8 threads)
- * - Half the memory (1.7 GB vs 3.2 GB loaded)
- * - Better /no_think compliance (375 vs 918 tokens for same workflow)
- * - Fits under 2.6 GiB memory pressure threshold
- * - Qwen 3.5 has broken tool calling on Ollama (issues #14493, #14745)
+ * Model name used by opencode. Uses qwen3:4b because:
+ * - Fastest avg duration (78.9s) with tightest variance (11s spread) in 5-trial eval
+ * - All 3 candidates scored 5/5 reward 1.00: qwen3:4b (78.9s), qwen3.5:4b (82.6s), qwen3:1.7b (80.2s)
+ * - 2.5 GB loaded -- no OOM on 32 GB machine even with qwen2.5:3b grader
  * - Only Qwen3 family produces structured tool calls on Ollama
  * NO custom system prompt -- opencode provides its own via the OpenAI-compatible API.
  */
-const OPENCODE_MODEL = 'qwen3-1.7b-opencode-agent';
+const OPENCODE_MODEL = 'qwen3-4b-opencode-agent';
 
 /**
  * OpenCodeAgent -- wraps the `opencode run` CLI with config injection,

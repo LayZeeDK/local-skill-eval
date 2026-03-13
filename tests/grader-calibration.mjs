@@ -183,6 +183,18 @@ async function grade(v) {
       }
     }
 
+    // Technique E: Intra-section entailment (must match parseResponse)
+    const summaryPattern = /\b\d+-step\b|workflow|process|procedure/i;
+    for (const c of parsed.criteria) {
+      if (!c.met || !summaryPattern.test(c.criterion)) { continue; }
+      const section = sectionOf(c.criterion);
+      if (!section) { continue; }
+      const siblingFailed = parsed.criteria.some(
+        s => s !== c && sectionOf(s.criterion) === section && !s.met
+      );
+      if (siblingFailed) { c.met = false; }
+    }
+
     // Technique C: Weighted scoring - workflow 2x
     let weightedMet = 0, weightedTotal = 0;
     for (const c of parsed.criteria) {

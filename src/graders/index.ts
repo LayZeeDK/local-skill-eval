@@ -533,6 +533,37 @@ Respond with ONLY a JSON object: {"commands_found": ["cmd1", ...], "criteria": [
                         }
                     }
 
+                    // Technique E (intra-section entailment): If a "summary" criterion
+                    // (mentions N-step workflow/process/procedure) is marked true but a
+                    // sibling criterion in the SAME rubric section is false, the summary
+                    // is logically inconsistent — override to false.
+                    // Ref: DeepEval DAG metric (conditional scoring via decision trees);
+                    // Autorubric (arxiv:2603.00077) CANNOT_ASSESS for dependent criteria;
+                    // Logical consistency survey (arxiv:2410.02205) transitivity dimension.
+                    const summaryPattern = /\b\d+-step\b|workflow|process|procedure/i;
+
+                    for (const c of parsed.criteria) {
+                        if (!c.met || !summaryPattern.test(c.criterion)) {
+                            continue;
+                        }
+
+                        const section = sectionOf(c.criterion);
+
+                        if (!section) {
+                            continue;
+                        }
+
+                        const siblingFailed = parsed.criteria.some(
+                            (s: any) => s !== c
+                                && sectionOf(s.criterion) === section
+                                && !s.met
+                        );
+
+                        if (siblingFailed) {
+                            c.met = false;
+                        }
+                    }
+
                     // Technique C (weighted scoring): Workflow criteria count 2x,
                     // reflecting rubric dimension weights (Workflow 0-0.4 vs others 0-0.3).
                     // Ref: RocketEval (ICLR 2025, arxiv:2503.05142) confidence-weighted

@@ -592,9 +592,13 @@ async function main() {
 
     // --- warmUp tests ---
 
+    // Each warmUp test uses a unique model name because warmedModels is module-level
+    // state (not per-instance), so a model warmed in one test stays warm for later tests.
+
     await test('warmUp sends /api/generate with num_predict:1 and short prompt on first call', async () => {
         let capturedBody: any = null;
         const freshGrader = new LLMGrader();
+        const testModel = 'test-warmup-request:4b';
 
         globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
             const url = typeof input === 'string' ? input : input.toString();
@@ -611,18 +615,19 @@ async function main() {
             throw new Error(`Unexpected fetch: ${url}`);
         }) as typeof globalThis.fetch;
 
-        await (freshGrader as any).warmUp('http://localhost:11434', 'qwen3:4b');
+        await (freshGrader as any).warmUp('http://localhost:11434', testModel);
 
         assert(capturedBody !== null, 'warmUp should have sent a fetch request');
         assert(capturedBody.options.num_predict === 1, `num_predict should be 1, got: ${capturedBody.options?.num_predict}`);
         assert(capturedBody.prompt === 'hi', `prompt should be "hi", got: ${capturedBody.prompt}`);
         assert(capturedBody.stream === false, `stream should be false, got: ${capturedBody.stream}`);
-        assert(capturedBody.model === 'qwen3:4b', `model should be qwen3:4b, got: ${capturedBody.model}`);
+        assert(capturedBody.model === testModel, `model should be ${testModel}, got: ${capturedBody.model}`);
     });
 
     await test('warmUp does NOT send request on second call (warmedUp flag prevents repeat)', async () => {
         let callCount = 0;
         const freshGrader = new LLMGrader();
+        const testModel = 'test-warmup-repeat:4b';
 
         globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
             const url = typeof input === 'string' ? input : input.toString();
@@ -639,14 +644,15 @@ async function main() {
             throw new Error(`Unexpected fetch: ${url}`);
         }) as typeof globalThis.fetch;
 
-        await (freshGrader as any).warmUp('http://localhost:11434', 'qwen3:4b');
-        await (freshGrader as any).warmUp('http://localhost:11434', 'qwen3:4b');
+        await (freshGrader as any).warmUp('http://localhost:11434', testModel);
+        await (freshGrader as any).warmUp('http://localhost:11434', testModel);
 
         assert(callCount === 1, `warmUp should have sent only 1 request, sent: ${callCount}`);
     });
 
     await test('warmUp failure (fetch throws) logs warning but does not throw -- grade() proceeds', async () => {
         const freshGrader = new LLMGrader();
+        const testModel = 'test-warmup-failure:4b';
 
         globalThis.fetch = (async () => {
             throw new Error('simulated network error');
@@ -656,7 +662,7 @@ async function main() {
         let threw = false;
 
         try {
-            await (freshGrader as any).warmUp('http://localhost:11434', 'qwen3:4b');
+            await (freshGrader as any).warmUp('http://localhost:11434', testModel);
         } catch {
             threw = true;
         }
@@ -705,6 +711,7 @@ async function main() {
     await test('warmUp timeout is 120000ms (verified via AbortSignal.timeout argument)', async () => {
         let capturedSignal: AbortSignal | undefined;
         const freshGrader = new LLMGrader();
+        const testModel = 'test-warmup-timeout:4b';
 
         globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
             const url = typeof input === 'string' ? input : input.toString();
@@ -721,7 +728,7 @@ async function main() {
             throw new Error(`Unexpected fetch: ${url}`);
         }) as typeof globalThis.fetch;
 
-        await (freshGrader as any).warmUp('http://localhost:11434', 'qwen3:4b');
+        await (freshGrader as any).warmUp('http://localhost:11434', testModel);
 
         assert(capturedSignal !== undefined, 'warmUp should pass a signal to fetch');
         // AbortSignal.timeout creates a signal -- we can check it exists

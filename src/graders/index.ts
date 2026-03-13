@@ -50,23 +50,27 @@ export class DeterministicGrader implements Grader {
     }
 }
 
+// Module-level state so LLMGrader instances are effectively stateless.
+// This lets evalRunner create fresh instances per trial (upstream behavior)
+// without redundant Ollama model loads that cause timeouts.
+const warmedModels = new Set<string>();
+let warnedAboutConfig = false;
+
 /**
  * Uses an LLM to evaluate the agent's session transcript against a rubric.
  * Tries Ollama first (local, no API key), then falls back to Gemini/Anthropic cloud providers.
  */
 export class LLMGrader implements Grader {
-    private warnedAboutConfig = false;
-    private warmedUp = false;
     // Set by grade() before any provider call, consumed by parseResponse.
     // Maps criterion text → rubric section header (lowercased).
     private criteriaSections: Map<string, string> = new Map();
 
     private warnOllamaConfig(): void {
-        if (this.warnedAboutConfig) {
+        if (warnedAboutConfig) {
             return;
         }
 
-        this.warnedAboutConfig = true;
+        warnedAboutConfig = true;
 
         // Only warn in CI -- optimized env vars improved benchmarks on 4-vCPU CI
         // runners (12s -> 6.3s) but had no effect on local 12-core Snapdragon X Elite.
@@ -94,11 +98,11 @@ export class LLMGrader implements Grader {
     }
 
     private async warmUp(ollamaHost: string, model: string): Promise<void> {
-        if (this.warmedUp) {
+        if (warmedModels.has(model)) {
             return;
         }
 
-        this.warmedUp = true;
+        warmedModels.add(model);
         const numCtx = 2048;
         const start = Date.now();
         console.log(`[LLMGrader] Warming up ${model}...`);

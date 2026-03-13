@@ -71,6 +71,7 @@ None.
 
 - Phase 4.1 added: Tune Ollama agent to 5 min trial average (model/Ollama parameters, prompt engineering, alternative models)
 - Phase 5.1 inserted after Phase 5: Tune OpenCodeAgent for Multi-Step Tool Execution (URGENT) -- Plan 05-03 blocked, model can't complete 3-step workflow through opencode
+- Phase 8 added: Review fork changes against Open-Closed Principle
 
 ### Blockers/Concerns
 

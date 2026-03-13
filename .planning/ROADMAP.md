@@ -143,6 +143,16 @@ Plans:
 - 16GB RAM runner must fit agent model + grader model sequentially
 - opencode auto-update in CI adds latency -- disable with env var
 
+### Phase 8: Review fork changes against Open-Closed Principle
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 7
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 8 to break down)
+
 ---
 
 #### Phase 7: End-to-End Validation + Performance Comparison

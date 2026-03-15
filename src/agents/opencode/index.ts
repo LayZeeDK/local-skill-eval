@@ -135,8 +135,41 @@ export class OpenCodeAgent extends BaseAgent {
             const innerCmd = timeoutCmd
                 ? `${envVars} ${timeoutCmd} ${opencodeInvocation}`
                 : `${envVars} ${opencodeInvocation}`;
-            const fullCmd = innerCmd;
-            console.log('[OpenCodeAgent] Running:', fullCmd.slice(0, 200));
+
+            // Diagnostic: on Linux local provider, run strace in the
+            // background to capture what syscall the process blocks on
+            // when Bun hangs after completing work.  Writes to /tmp so
+            // it doesn't pollute the workspace.
+            const diagnose = process.platform === 'linux' && !inDocker;
+            const fullCmd = diagnose
+                ? [
+                    // Launch strace on the process tree, following forks
+                    `${innerCmd} &`,
+                    'OPENCODE_PID=$!',
+                    'echo "[diag] opencode pid=$OPENCODE_PID"',
+                    // Snapshot open fds after 5s (before it hangs)
+                    '(sleep 5 && ls -la /proc/$OPENCODE_PID/fd 2>/dev/null > /tmp/.opencode-fds-early.txt) &',
+                    // Snapshot after 60s (likely hung by then)
+                    '(sleep 60 && ls -la /proc/$OPENCODE_PID/fd 2>/dev/null > /tmp/.opencode-fds-late.txt && cat /proc/$OPENCODE_PID/stack 2>/dev/null > /tmp/.opencode-stack.txt && cat /proc/$OPENCODE_PID/status 2>/dev/null > /tmp/.opencode-status.txt) &',
+                    // Wait for opencode (or timeout to kill it)
+                    'wait $OPENCODE_PID 2>/dev/null',
+                    'EXIT_CODE=$?',
+                    'echo "[diag] opencode exited with $EXIT_CODE"',
+                    'echo "[diag] === early fds ==="',
+                    'cat /tmp/.opencode-fds-early.txt 2>/dev/null || echo "(not captured)"',
+                    'echo "[diag] === late fds ==="',
+                    'cat /tmp/.opencode-fds-late.txt 2>/dev/null || echo "(not captured)"',
+                    'echo "[diag] === kernel stack ==="',
+                    'cat /tmp/.opencode-stack.txt 2>/dev/null || echo "(not captured)"',
+                    'echo "[diag] === process status ==="',
+                    'cat /tmp/.opencode-status.txt 2>/dev/null || echo "(not captured)"',
+                    'echo "[diag] === process tree ==="',
+                    'ps auxf 2>/dev/null | head -40',
+                    'exit $EXIT_CODE',
+                  ].join('\n')
+                : innerCmd;
+
+            console.log('[OpenCodeAgent] Running:', (diagnose ? '[with diagnostics] ' : '') + innerCmd.slice(0, 200));
             const result = await runCommand(fullCmd);
             console.log('[OpenCodeAgent] exit:', result.exitCode, 'stdout:', result.stdout.length, 'bytes, stderr:', result.stderr.length, 'bytes');
 

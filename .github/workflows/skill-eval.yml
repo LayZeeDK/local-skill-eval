@@ -66,7 +66,7 @@ jobs:
 
   agent-eval:
     name: Agent Eval (${{ matrix.agent }}/${{ matrix.provider }})
-    runs-on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -76,6 +76,7 @@ jobs:
         include:
           - agent: ollama
             provider: local
+            runner: ubuntu-24.04-arm
             models: |
               - name: qwen2.5:3b
                 modelfile: modelfiles/qwen2.5-3b-skill-eval-ollama-agent.ci.Modelfile
@@ -83,6 +84,7 @@ jobs:
               - name: qwen3:4b
           - agent: ollama
             provider: docker
+            runner: ubuntu-24.04-arm
             models: |
               - name: qwen2.5:3b
                 modelfile: modelfiles/qwen2.5-3b-skill-eval-ollama-agent.ci.Modelfile
@@ -90,12 +92,14 @@ jobs:
               - name: qwen3:4b
           - agent: opencode
             provider: local
+            runner: ubuntu-latest
             models: |
               - name: qwen3:4b
                 modelfile: modelfiles/qwen3-4b-skill-eval-opencode-agent.ci.Modelfile
                 as: qwen3-4b-skill-eval-opencode-agent
           - agent: opencode
             provider: docker
+            runner: ubuntu-latest
             models: |
               - name: qwen3:4b
                 modelfile: modelfiles/qwen3-4b-skill-eval-opencode-agent.ci.Modelfile

@@ -6,7 +6,7 @@ import * as fs from 'fs';
 /**
  * Model name used by opencode. Uses qwen3:4b because:
  * - Fastest avg duration (78.9s) with tightest variance (11s spread) in 5-trial eval
- * - All 3 candidates scored 5/5 reward 1.00: qwen3:4b (78.9s), qwen3.5:4b (82.6s), qwen3:1.7b (80.2s)
+ * - All 3 candidates scored reward 1.00; qwen3:4b had best consistency (78.9s avg, 11s spread)
  * - 2.5 GB loaded -- no OOM on 32 GB machine even with qwen2.5:3b grader
  * - Only Qwen3 family produces structured tool calls on Ollama
  * NO custom system prompt -- opencode provides its own via the OpenAI-compatible API.
@@ -17,20 +17,12 @@ const OPENCODE_MODEL = 'qwen3-4b-skill-eval-opencode-agent';
  * OpenCodeAgent -- wraps the `opencode run` CLI with config injection,
  * git init for project detection, and Ollama model unload.
  *
- * Follows the established CLI agent pattern (GeminiAgent/ClaudeAgent) with
- * three additions:
+ * Follows the established CLI agent pattern with three additions:
  * 1. Config injection: copies opencode.json into workspace CWD before launch
  * 2. Git init: opencode uses git root detection for project config lookup
  * 3. Model unload: calls keep_alive: 0 in finally block after run completes
  *
- * Uses qwen3.5:4b because Qwen 2.5 (both 3B and 7B) failed to handle
- * opencode's 10+ tool definitions via the OpenAI-compatible API. Qwen 3.5
- * has significantly better tool-calling training data. NO custom system
- * prompt -- opencode provides its own.
- *
  * Timeout protection is provided by the evalRunner's withTimeout wrapper.
- * The bash `timeout` command was removed because it causes SIGSEGV when
- * wrapping the opencode x64 binary under ARM64 QEMU emulation on Windows.
  */
 export class OpenCodeAgent extends BaseAgent {
     private ollamaClient: Ollama;
@@ -52,9 +44,16 @@ export class OpenCodeAgent extends BaseAgent {
             'utf-8'
         ));
 
-        const hostnameResult = await runCommand('cat /proc/1/cgroup 2>/dev/null | head -1');
-        let inDocker = hostnameResult.stdout.includes('docker')
-            || hostnameResult.stdout.includes('kubepods');
+        // Primary: /.dockerenv exists in every Docker container (works on cgroupv1 and cgroupv2)
+        const dockerenvResult = await runCommand('test -f /.dockerenv && echo yes || echo no');
+        let inDocker = dockerenvResult.stdout.trim() === 'yes';
+
+        if (!inDocker) {
+            // Fallback: cgroup v1 detection
+            const cgroupResult = await runCommand('cat /proc/1/cgroup 2>/dev/null | head -1');
+            inDocker = cgroupResult.stdout.includes('docker')
+                || cgroupResult.stdout.includes('kubepods');
+        }
 
         if (!inDocker) {
             // Also check for /workspace path pattern typical of Docker containers
@@ -66,7 +65,7 @@ export class OpenCodeAgent extends BaseAgent {
                 console.log('[OpenCodeAgent] Docker context detected (workspace path) -- using host.docker.internal');
             }
         } else {
-            console.log('[OpenCodeAgent] Docker context detected (cgroup) -- using host.docker.internal');
+            console.log('[OpenCodeAgent] Docker context detected -- using host.docker.internal');
         }
 
         if (inDocker) {
@@ -110,30 +109,8 @@ export class OpenCodeAgent extends BaseAgent {
         await runCommand(`echo '${b64}' | base64 -d > /tmp/.prompt.md`);
 
         try {
-            // 5. Invoke opencode with retry logic for SIGSEGV (exit 139).
-            //    The opencode x64 binary intermittently segfaults under ARM64
-            //    QEMU emulation. Retrying usually succeeds. Stdin is redirected
-            //    from a regular file to reduce (but not eliminate) crash frequency.
-            //    The evalRunner's withTimeout provides the outer timeout protection.
-            const maxRetries = 3;
-            let lastResult: CommandResult | null = null;
-
-            for (let attempt = 1; attempt <= maxRetries; attempt++) {
-                const result = await runCommand(`OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1 OPENCODE_DISABLE_PROJECT_CONFIG=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1 opencode run "$(cat /tmp/.prompt.md)" < /tmp/.prompt.md`);
-                lastResult = result;
-
-                if (result.exitCode === 139) {
-                    console.warn(`[OpenCodeAgent] SIGSEGV on attempt ${attempt}/${maxRetries} (x64 emulation instability)`);
-
-                    if (attempt < maxRetries) {
-                        continue;
-                    }
-                }
-
-                break;
-            }
-
-            const result = lastResult!;
+            // 5. Invoke opencode -- evalRunner's withTimeout provides outer timeout protection
+            const result = await runCommand(`OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1 OPENCODE_DISABLE_PROJECT_CONFIG=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1 opencode run "$(cat /tmp/.prompt.md)" < /tmp/.prompt.md`);
 
             if (result.exitCode !== 0) {
                 console.error('[OpenCodeAgent] opencode exited with code:', result.exitCode);

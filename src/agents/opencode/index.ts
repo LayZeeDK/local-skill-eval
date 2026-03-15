@@ -110,7 +110,9 @@ export class OpenCodeAgent extends BaseAgent {
 
         try {
             // 5. Invoke opencode -- evalRunner's withTimeout provides outer timeout protection
-            const result = await runCommand(`OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1 OPENCODE_DISABLE_PROJECT_CONFIG=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1 opencode run "$(cat /tmp/.prompt.md)" < /tmp/.prompt.md`);
+            //    Use OPENCODE_BIN_PATH if set (CI setup-opencode action), else bare 'opencode'
+            const opencodeBin = process.env.OPENCODE_BIN_PATH || 'opencode';
+            const result = await runCommand(`OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1 OPENCODE_DISABLE_PROJECT_CONFIG=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1 ${opencodeBin} run "$(cat /tmp/.prompt.md)" < /tmp/.prompt.md`);
 
             if (result.exitCode !== 0) {
                 console.error('[OpenCodeAgent] opencode exited with code:', result.exitCode);

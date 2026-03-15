@@ -103,6 +103,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node
+      - name: Tune kernel for large-RSS processes
+        run: |
+          # fork() fails with EAGAIN when Ollama holds GBs of RSS and
+          # the kernel's heuristic overcommit check rejects the COW clone.
+          # overcommit_memory=1 tells the kernel to always allow fork().
+          sudo sysctl -w vm.overcommit_memory=1
+          sudo sysctl -w vm.max_map_count=262144
       - uses: ./.github/actions/setup-ollama
         with:
           models: ${{ matrix.models }}

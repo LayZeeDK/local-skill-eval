@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: opencode + Ollama Agent Backends
-status: Plan 06-02 complete. setup-opencode action created, Docker detection fixed.
-stopped_at: Completed 06-02-PLAN.md
-last_updated: "2026-03-15T00:05:17.831Z"
-last_activity: 2026-03-15 -- Plan 06-02 setup-opencode action and Docker detection fix
+status: Phase 6 complete. All 3 CI integration plans done. All 5 CI jobs green.
+stopped_at: Completed 06-03-PLAN.md
+last_updated: "2026-03-15T12:00:00.000Z"
+last_activity: 2026-03-15 -- Plan 06-03 agent-eval matrix and validate-graders consolidation
 progress:
   total_phases: 7
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 17
-  completed_plans: 16
+  completed_plans: 17
 ---
 
 # Project State
@@ -24,10 +24,10 @@ See: .planning/PROJECT.md (updated 2026-03-10)
 
 ## Current Position
 
-Phase: Phase 6 (CI Integration) -- Plan 02 complete
-Plan: 2 of 3 complete
-Status: Plan 06-02 complete. setup-opencode action created, Docker detection fixed for cgroup v2, SIGSEGV retry removed.
-Last activity: 2026-03-15 -- Plan 06-02 setup-opencode action and Docker detection fix
+Phase: Phase 6 (CI Integration) -- COMPLETE
+Plan: 3 of 3 complete
+Status: Phase 6 complete. All 3 CI integration plans done. All 5 CI jobs green.
+Last activity: 2026-03-15 -- Plan 06-03 agent-eval matrix and validate-graders consolidation
 
 ## Accumulated Context
 
@@ -71,6 +71,9 @@ Decisions logged in PROJECT.md Key Decisions table. v1.0 decisions archived to m
 - [Phase 06]: Used temp-file approach for YAML parsing to avoid subshell variable scoping in piped while-read
 - [Phase 06]: dockerenv-first detection order: /.dockerenv > cgroup v1 > workspace path (cgroup v2 safe)
 - [Phase 06]: Removed SIGSEGV retry loop -- ARM64 native binary eliminates x64 emulation crashes
+- [Phase 06]: opencode agent-eval jobs use ubuntu-latest (x64) -- Bun runtime hangs on ARM64 in CI
+- [Phase 06]: setup-opencode verifies binary existence instead of opencode --version (hangs on both architectures)
+- [Phase 06]: Fork-aware PR creation rule added to AGENTS.md
 
 ### Pending Todos
 
@@ -84,7 +87,7 @@ None.
 
 ### Blockers/Concerns
 
-- opencode linux-arm64 SIGABRT (issue #13367) -- verify in Phase 6, fallback to x64 runner
+- ~~opencode linux-arm64 SIGABRT (issue #13367) -- verify in Phase 6, fallback to x64 runner~~ RESOLVED: x64 runners used for opencode jobs
 
 ## Performance Metrics
 
@@ -97,9 +100,10 @@ None.
 | 05 | 02 | 2min | 2 | 3 |
 | Phase 06 P01 | 2min | 2 tasks | 5 files |
 | Phase 06 P02 | 2min | 2 tasks | 2 files |
+| 06 | 03 | ~30min | 2 | 3 |
 
 ## Session Continuity
 
-Last session: 2026-03-15T00:05:17.828Z
-Stopped at: Completed 06-02-PLAN.md
+Last session: 2026-03-15T12:00:00.000Z
+Stopped at: Completed 06-03-PLAN.md (Phase 6 complete)
 Resume file: None

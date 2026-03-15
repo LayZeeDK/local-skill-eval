@@ -25,7 +25,7 @@ Full details: milestones/v1.0-ROADMAP.md
 - [x] Phase 4.1: Tune Ollama Agent to 5 Min Trial Average
 - [~] Phase 5: OpenCodeAgent (Plan 03 blocked -- model can't drive multi-step workflow)
 - [x] Phase 5.1: Tune OpenCodeAgent for Multi-Step Tool Execution (INSERTED) -- completed 2026-03-13
-- [ ] Phase 6: CI Integration
+- [x] Phase 6: CI Integration
 - [ ] Phase 7: End-to-End Validation + Performance Comparison
 
 #### Phase 4: OllamaToolAgent + Ollama Model Setup
@@ -136,9 +136,9 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
-- [ ] 06-01-PLAN.md -- Extend setup-ollama with multi-model YAML input and migrate callers
-- [ ] 06-02-PLAN.md -- Create setup-opencode action and fix OpenCodeAgent Docker detection
-- [ ] 06-03-PLAN.md -- Add agent-eval matrix job and consolidate validate-graders
+- [x] 06-01-PLAN.md -- Extend setup-ollama with multi-model YAML input and migrate callers
+- [x] 06-02-PLAN.md -- Create setup-opencode action and fix OpenCodeAgent Docker detection
+- [x] 06-03-PLAN.md -- Add agent-eval matrix job and consolidate validate-graders
 
 **Delivers:**
 - setup-ollama action extended: agent model pull, Modelfile variant creation
@@ -192,7 +192,7 @@ Plans:
 | 4.1. Tune Ollama Agent to 5 Min Trial Average | v2.0 | 3/3 | Complete | 2026-03-11 |
 | 5. OpenCodeAgent | v2.0 | 2/3 | Blocked (Plan 03) | -- |
 | 5.1. Tune OpenCodeAgent for Multi-Step Tool Execution | v2.0 | 5/5 | Complete | 2026-03-13 |
-| 6. CI Integration | v2.0 | 0/3 | Planned | -- |
+| 6. CI Integration | v2.0 | 3/3 | Complete | 2026-03-15 |
 | 7. End-to-End Validation + Comparison | v2.0 | 0/? | Pending | -- |
 
 ## Deferred

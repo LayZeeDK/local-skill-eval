@@ -107,7 +107,7 @@ jobs:
         with:
           models: ${{ matrix.models }}
       - name: Setup OpenCode
-        if: matrix.agent == 'opencode'
+        if: matrix.agent == 'opencode' && matrix.provider == 'local'
         uses: ./.github/actions/setup-opencode
       - name: Compute Docker cache key
         if: matrix.provider == 'docker'

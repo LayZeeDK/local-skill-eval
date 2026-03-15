@@ -135,10 +135,11 @@ export class OpenCodeAgent extends BaseAgent {
             const fullCmd = timeoutCmd
                 ? `${envVars} ${timeoutCmd} ${opencodeInvocation}`
                 : `${envVars} ${opencodeInvocation}`;
+            console.log('[OpenCodeAgent] Running:', fullCmd.slice(0, 200));
             const result = await runCommand(fullCmd);
+            console.log('[OpenCodeAgent] exit:', result.exitCode, 'stdout:', result.stdout.length, 'bytes, stderr:', result.stderr.length, 'bytes');
 
             if (result.exitCode !== 0) {
-                console.error('[OpenCodeAgent] opencode exited with code:', result.exitCode);
                 console.error('[OpenCodeAgent] stderr:', result.stderr.slice(0, 500));
                 console.error('[OpenCodeAgent] stdout (tail):', result.stdout.slice(-500));
             }

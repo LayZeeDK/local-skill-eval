@@ -1,0 +1,27 @@
+name: 'Setup OpenCode'
+description: 'Install opencode CLI, export OPENCODE_BIN_PATH, disable auto-update, verify installation'
+inputs:
+  version:
+    description: 'OpenCode version to install'
+    required: false
+    default: 'latest'
+runs:
+  using: 'composite'
+  steps:
+    - name: Install OpenCode
+      shell: bash
+      run: |
+        npm install -g opencode-ai@${{ inputs.version }}
+        echo "OPENCODE_BIN_PATH=$(command -v opencode)" >> "$GITHUB_ENV"
+        echo "OPENCODE_DISABLE_AUTOUPDATE=true" >> "$GITHUB_ENV"
+
+    - name: Verify installation
+      shell: bash
+      run: |
+        opencode --version
+
+    - name: ARM64 diagnostics
+      shell: bash
+      run: |
+        echo "[INFO] Page size: $(getconf PAGE_SIZE) bytes"
+        echo "[INFO] Architecture: $(uname -m)"

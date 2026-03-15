@@ -123,14 +123,18 @@ export class OpenCodeAgent extends BaseAgent {
             //    Use OPENCODE_BIN_PATH for local provider (CI setup-opencode sets it);
             //    inside Docker, opencode is installed in-container and on PATH.
             const opencodeBin = (!inDocker && process.env.OPENCODE_BIN_PATH) || 'opencode';
-            const envPrefix = 'OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1 OPENCODE_DISABLE_PROJECT_CONFIG=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1';
-            const opencodeCmd = `${envPrefix} ${opencodeBin} run "$(cat /tmp/.prompt.md)" < /tmp/.prompt.md`;
+            const envVars = 'OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1 OPENCODE_DISABLE_PROJECT_CONFIG=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1';
+            const opencodeInvocation = `${opencodeBin} run "$(cat /tmp/.prompt.md)" < /tmp/.prompt.md`;
 
-            // 570s leaves 30s buffer before the 600s evalRunner timeout
-            const timeoutPrefix = process.platform !== 'win32'
+            // 570s leaves 30s buffer before the 600s evalRunner timeout.
+            // env vars go BEFORE timeout so the shell handles them;
+            // timeout uses execvp(), so it needs a real binary as argv[0].
+            const timeoutCmd = process.platform !== 'win32'
                 ? 'timeout --signal=TERM --kill-after=10 570'
                 : '';
-            const fullCmd = timeoutPrefix ? `${timeoutPrefix} ${opencodeCmd}` : opencodeCmd;
+            const fullCmd = timeoutCmd
+                ? `${envVars} ${timeoutCmd} ${opencodeInvocation}`
+                : `${envVars} ${opencodeInvocation}`;
             const result = await runCommand(fullCmd);
 
             if (result.exitCode !== 0) {

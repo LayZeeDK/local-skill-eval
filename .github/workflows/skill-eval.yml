@@ -133,6 +133,7 @@ jobs:
         if: matrix.provider == 'docker' && steps.docker-restore.outputs.cache-hit == 'true'
         run: docker load -i /tmp/docker-cache/eval-image.tar
       - name: Run agent eval
+        timeout-minutes: 15
         run: npx tsx src/cli.ts superlint_demo --agent=${{ matrix.agent }} --provider=${{ matrix.provider }} --trials=1
       - name: Save Docker image to cache
         if: matrix.provider == 'docker' && steps.docker-restore.outputs.cache-hit != 'true'

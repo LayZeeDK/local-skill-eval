@@ -8,22 +8,17 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - name: Install OpenCode
+    - name: Install and verify OpenCode
       shell: bash
       run: |
         npm install -g opencode-ai@${{ inputs.version }}
-        echo "OPENCODE_BIN_PATH=$(command -v opencode)" >> "$GITHUB_ENV"
-        echo "OPENCODE_DISABLE_AUTOUPDATE=true" >> "$GITHUB_ENV"
-
-    - name: Verify installation
-      shell: bash
-      run: |
-        # opencode --version hangs in CI (Bun runtime initialization issue)
-        # Verify binary exists and is executable instead
-        if [ -x "$OPENCODE_BIN_PATH" ]; then
-          echo "[OK] opencode installed at $OPENCODE_BIN_PATH"
+        OPENCODE_PATH=$(command -v opencode)
+        if [ -x "$OPENCODE_PATH" ]; then
+          echo "[OK] opencode installed at $OPENCODE_PATH"
         else
-          echo "[ERROR] opencode not found at $OPENCODE_BIN_PATH"
+          echo "[ERROR] opencode not found"
           exit 1
         fi
+        echo "OPENCODE_BIN_PATH=$OPENCODE_PATH" >> "$GITHUB_ENV"
+        echo "OPENCODE_DISABLE_AUTOUPDATE=true" >> "$GITHUB_ENV"
         echo "[INFO] Architecture: $(uname -m)"

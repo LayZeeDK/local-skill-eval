@@ -116,6 +116,8 @@ export class OpenCodeAgent extends BaseAgent {
 
             if (result.exitCode !== 0) {
                 console.error('[OpenCodeAgent] opencode exited with code:', result.exitCode);
+                console.error('[OpenCodeAgent] stderr:', result.stderr.slice(0, 500));
+                console.error('[OpenCodeAgent] stdout (tail):', result.stdout.slice(-500));
             }
 
             return result.stdout + '\n' + result.stderr;

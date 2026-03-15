@@ -129,30 +129,13 @@ export class OpenCodeAgent extends BaseAgent {
             // 570s leaves 30s buffer before the 600s evalRunner timeout.
             // env vars go BEFORE timeout so the shell handles them;
             // timeout uses execvp(), so it needs a real binary as argv[0].
-            //
-            // On Linux, wrap in `script -qc ... /dev/null` to allocate a
-            // pseudo-TTY.  Bun (opencode's runtime) hangs on ARM64 Linux
-            // when spawned without a TTY — it completes work but never
-            // exits.  Docker's Tty:true avoids this; script -qc replicates
-            // that for the local provider.
-            const isLinux = process.platform === 'linux';
             const timeoutCmd = process.platform !== 'win32'
                 ? 'timeout --signal=TERM --kill-after=10 570'
                 : '';
             const innerCmd = timeoutCmd
                 ? `${envVars} ${timeoutCmd} ${opencodeInvocation}`
                 : `${envVars} ${opencodeInvocation}`;
-            // On Linux local provider, wrap in script -qec to allocate a
-            // pseudo-TTY.  Skip for Docker — DockerProvider already sets
-            // Tty:true in docker exec; a nested PTY breaks command execution.
-            // -q suppresses "Script started/done" messages, -e propagates
-            // the child's exit code.  Single quotes prevent the outer bash
-            // from expanding $(cat ...) — script passes the literal string
-            // to /bin/sh -c which handles the expansion.
-            const useScriptPty = isLinux && !inDocker;
-            const fullCmd = useScriptPty
-                ? `script -qec '${innerCmd}' /dev/null`
-                : innerCmd;
+            const fullCmd = innerCmd;
             console.log('[OpenCodeAgent] Running:', fullCmd.slice(0, 200));
             const result = await runCommand(fullCmd);
             console.log('[OpenCodeAgent] exit:', result.exitCode, 'stdout:', result.stdout.length, 'bytes, stderr:', result.stderr.length, 'bytes');

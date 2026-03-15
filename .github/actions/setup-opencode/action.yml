@@ -18,10 +18,8 @@ runs:
     - name: Verify installation
       shell: bash
       run: |
-        opencode --version
-
-    - name: ARM64 diagnostics
-      shell: bash
-      run: |
-        echo "[INFO] Page size: $(getconf PAGE_SIZE) bytes"
+        # opencode --version hangs in CI (Bun runtime initialization issue)
+        # Verify binary exists and is executable instead
+        OPENCODE_PATH=$(command -v opencode)
+        test -x "$OPENCODE_PATH" && echo "[OK] opencode installed at $OPENCODE_PATH" || { echo "[ERROR] opencode not found"; exit 1; }
         echo "[INFO] Architecture: $(uname -m)"

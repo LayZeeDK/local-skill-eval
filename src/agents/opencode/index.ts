@@ -81,6 +81,10 @@ export class OpenCodeAgent extends BaseAgent {
                 if (installResult.exitCode !== 0) {
                     console.error('[OpenCodeAgent] Failed to install opencode:', installResult.stdout);
                 }
+
+                // Log where npm installed the binary
+                const verifyResult = await runCommand('which opencode 2>/dev/null || echo "NOT_FOUND"; echo "npm prefix: $(npm prefix -g)"; echo "PATH=$PATH"');
+                console.log('[OpenCodeAgent] Docker opencode install verify:', verifyResult.stdout.trim());
             }
         }
 
@@ -110,8 +114,9 @@ export class OpenCodeAgent extends BaseAgent {
 
         try {
             // 5. Invoke opencode -- evalRunner's withTimeout provides outer timeout protection
-            //    Use OPENCODE_BIN_PATH if set (CI setup-opencode action), else bare 'opencode'
-            const opencodeBin = process.env.OPENCODE_BIN_PATH || 'opencode';
+            //    Use OPENCODE_BIN_PATH for local provider (CI setup-opencode sets it);
+            //    inside Docker, opencode is installed in-container and on PATH.
+            const opencodeBin = (!inDocker && process.env.OPENCODE_BIN_PATH) || 'opencode';
             const result = await runCommand(`OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1 OPENCODE_DISABLE_PROJECT_CONFIG=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1 ${opencodeBin} run "$(cat /tmp/.prompt.md)" < /tmp/.prompt.md`);
 
             if (result.exitCode !== 0) {

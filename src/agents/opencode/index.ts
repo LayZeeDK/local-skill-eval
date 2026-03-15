@@ -113,11 +113,25 @@ export class OpenCodeAgent extends BaseAgent {
         await runCommand(`echo '${b64}' | base64 -d > /tmp/.prompt.md`);
 
         try {
-            // 5. Invoke opencode -- evalRunner's withTimeout provides outer timeout protection
+            // 5. Invoke opencode with process-level timeout protection.
+            //    evalRunner's withTimeout is promise-level only — it rejects the
+            //    JS promise but cannot kill the spawned child process, leaving
+            //    orphaned opencode/Ollama processes that block CI job cleanup.
+            //    On Linux, wrap with coreutils `timeout` to SIGTERM → SIGKILL
+            //    the entire process group.  On Windows (Git Bash), `timeout` is
+            //    a different command; rely on evalRunner's promise timeout there.
             //    Use OPENCODE_BIN_PATH for local provider (CI setup-opencode sets it);
             //    inside Docker, opencode is installed in-container and on PATH.
             const opencodeBin = (!inDocker && process.env.OPENCODE_BIN_PATH) || 'opencode';
-            const result = await runCommand(`OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1 OPENCODE_DISABLE_PROJECT_CONFIG=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1 ${opencodeBin} run "$(cat /tmp/.prompt.md)" < /tmp/.prompt.md`);
+            const envPrefix = 'OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1 OPENCODE_DISABLE_PROJECT_CONFIG=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1';
+            const opencodeCmd = `${envPrefix} ${opencodeBin} run "$(cat /tmp/.prompt.md)" < /tmp/.prompt.md`;
+
+            // 570s leaves 30s buffer before the 600s evalRunner timeout
+            const timeoutPrefix = process.platform !== 'win32'
+                ? 'timeout --signal=TERM --kill-after=10 570'
+                : '';
+            const fullCmd = timeoutPrefix ? `${timeoutPrefix} ${opencodeCmd}` : opencodeCmd;
+            const result = await runCommand(fullCmd);
 
             if (result.exitCode !== 0) {
                 console.error('[OpenCodeAgent] opencode exited with code:', result.exitCode);

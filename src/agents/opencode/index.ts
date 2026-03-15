@@ -142,12 +142,15 @@ export class OpenCodeAgent extends BaseAgent {
             const innerCmd = timeoutCmd
                 ? `${envVars} ${timeoutCmd} ${opencodeInvocation}`
                 : `${envVars} ${opencodeInvocation}`;
-            // script -qec: -q suppresses "Script started/done" messages,
-            // -e propagates the child's exit code, -c runs the command.
-            // Single quotes prevent the outer bash from expanding $(cat ...)
-            // — script passes the literal string to /bin/sh -c which handles
-            // the expansion.  /dev/null discards the typescript file.
-            const fullCmd = isLinux
+            // On Linux local provider, wrap in script -qec to allocate a
+            // pseudo-TTY.  Skip for Docker — DockerProvider already sets
+            // Tty:true in docker exec; a nested PTY breaks command execution.
+            // -q suppresses "Script started/done" messages, -e propagates
+            // the child's exit code.  Single quotes prevent the outer bash
+            // from expanding $(cat ...) — script passes the literal string
+            // to /bin/sh -c which handles the expansion.
+            const useScriptPty = isLinux && !inDocker;
+            const fullCmd = useScriptPty
                 ? `script -qec '${innerCmd}' /dev/null`
                 : innerCmd;
             console.log('[OpenCodeAgent] Running:', fullCmd.slice(0, 200));

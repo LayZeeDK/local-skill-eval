@@ -11,6 +11,17 @@ When a task requires a command that may exceed 2 minutes (benchmarks, builds, de
 
 - Only one Ollama model should be loaded at a time. Run `ollama stop <model>` between experiments to free memory before loading the next model.
 
+## Pull Requests (fork-aware)
+
+This repo is a fork. `gh pr create` defaults to the **upstream** repo (`mgechev/skill-eval`), which is wrong — PRs must target the **fork** (`LayZeeDK/local-skill-eval`).
+
+**Always use `--repo` when creating PRs:**
+```bash
+gh pr create --repo LayZeeDK/local-skill-eval --title "..." --body "..."
+```
+
+Never run bare `gh pr create` without `--repo` — it will create a PR against the upstream maintainer's repo.
+
 ## Open-Closed Principle (upstream fork)
 
 This repo is a fork of `mgechev/skill-eval`. Apply the Open-Closed Principle to upstream code:

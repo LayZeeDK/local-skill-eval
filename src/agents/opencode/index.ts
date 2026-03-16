@@ -165,7 +165,7 @@ export class OpenCodeAgent extends BaseAgent {
                 // requires stdout to be a terminal — fails silently with
                 // file redirect.  With `-p`, it exits on stdin EOF.
                 const timeoutCmd = `${envVars} timeout --signal=TERM --kill-after=10 300 ${opencodeRun}`;
-                const scriptCmd = `script --flush -qec "${timeoutCmd}" ${ocOutFile}`;
+                const scriptCmd = `script --flush -qec '${timeoutCmd}' ${ocOutFile}`;
                 // Outer timeout = inner (300s) + kill-after (10s) + margin (10s)
                 fullCmd = `unset NODE_OPTIONS; timeout --signal=TERM --kill-after=10 320 ${scriptCmd} 2>/dev/null`;
             } else {

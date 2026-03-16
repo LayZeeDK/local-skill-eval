@@ -95,13 +95,8 @@ export class OpenCodeAgent extends BaseAgent {
         // 2. Initialize git repo -- opencode uses git root for project config lookup
         await runCommand('git init -q 2>/dev/null || true');
 
-        // 3. Log model and memory for diagnostics
+        // 3. Log model for diagnostics
         console.log(`[OpenCodeAgent] Using model: ${OPENCODE_MODEL}`);
-
-        if (process.platform !== 'win32') {
-            const memResult = await runCommand('free -m | head -2; echo "---"; cat /proc/meminfo | head -5');
-            console.log('[OpenCodeAgent] Memory before run:', memResult.stdout.trim());
-        }
 
         // 4. Write instruction to temp file (established base64 pattern)
         //    Prefix with a directive to use bash tools — small models try to
@@ -147,8 +142,10 @@ export class OpenCodeAgent extends BaseAgent {
             // On Windows, Git Bash ConPTY provides a TTY; /dev/null gives
             // immediate EOF for Bun.stdin.text().
             const opencodeRun = `${opencodeBin} run "$(cat /tmp/.prompt.md)"`;
+            // Diagnostic: verify PTY allocation before invoking opencode
+            const ttyCheck = 'echo "TTY=$(tty) isatty=$(test -t 0 && echo yes || echo no)" >&2;';
             const opencodeInvocation = process.platform !== 'win32'
-                ? `script -qec 'unset NODE_OPTIONS; ${envVars} timeout --signal=TERM --kill-after=10 150 ${opencodeRun}' /dev/null`
+                ? `script -qec '${ttyCheck} unset NODE_OPTIONS; ${envVars} timeout --signal=TERM --kill-after=10 150 ${opencodeRun}' /dev/null`
                 : `${envVars} ${opencodeRun} < /dev/null`;
             const fullCmd = opencodeInvocation;
 
@@ -169,11 +166,6 @@ export class OpenCodeAgent extends BaseAgent {
 
             if (result.exitCode !== 0 && !killedByTimeout) {
                 console.error('[OpenCodeAgent] stdout (tail):', result.stdout.slice(-500));
-            }
-
-            if (process.platform !== 'win32') {
-                const memAfter = await runCommand('free -m | head -2; echo "---"; dmesg 2>/dev/null | tail -10 || true');
-                console.log('[OpenCodeAgent] Memory after run:', memAfter.stdout.trim());
             }
 
             return result.stdout + '\n' + result.stderr;

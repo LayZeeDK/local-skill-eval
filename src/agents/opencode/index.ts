@@ -132,36 +132,19 @@ export class OpenCodeAgent extends BaseAgent {
             // heap alongside Ollama's model (~2.5 GB).
             const envVars = 'OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1 OPENCODE_DISABLE_PROJECT_CONFIG=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1';
             // On Linux, wrap with `script -qec` to allocate a pseudo-TTY.
-            // opencode's run.ts calls Bun.stdin.text() when stdin is not a
-            // TTY, which blocks indefinitely on ARM64 Linux — regardless of
-            // whether stdin is a pipe, file, or /dev/null.  The only bypass
-            // is making process.stdin.isTTY === true.  `script` allocates a
-            // PTY, matching Docker's Tty:true behavior.  The trailing
-            // /dev/null is script's typescript file (discard it).
-            // On Windows, Git Bash provides a ConPTY so no wrapper is needed.
-            // Redirect stdin from /dev/null on all platforms — opencode's
-            // run.ts calls Bun.stdin.text() when stdin is not a TTY.
-            // On Windows (Git Bash ConPTY) /dev/null gives immediate EOF.
-            // On Linux, also wrap with `script -qec` to allocate a PTY —
             // Bun on ARM64 Linux blocks on Bun.stdin.text() regardless of
             // stdin source (pipe, file, /dev/null); only a real TTY
             // (process.stdin.isTTY === true) skips that code path.
+            // `timeout` must be INSIDE `script` — if outside, killing script
+            // orphans the opencode process inside the PTY, and Node.js spawn
+            // waits forever for the orphan's stdio pipes to close.
+            // On Windows, Git Bash ConPTY provides a TTY; /dev/null gives
+            // immediate EOF for Bun.stdin.text().
             const opencodeCmd = `${opencodeBin} run "$(cat /tmp/.prompt.md)" < /dev/null`;
             const opencodeInvocation = process.platform !== 'win32'
-                ? `script -qec '${opencodeCmd}' /dev/null`
-                : opencodeCmd;
-
-            // 150s is ~2x the typical agent duration (80s).  On ARM64 Linux,
-            // opencode (Bun) may hang after completing work; the timeout kills
-            // it and we still get the captured stdout.  env vars go BEFORE
-            // timeout so the shell handles them; timeout uses execvp() and
-            // needs a real binary as argv[0].
-            const timeoutCmd = process.platform !== 'win32'
-                ? 'timeout --signal=TERM --kill-after=10 150'
-                : '';
-            const fullCmd = timeoutCmd
-                ? `unset NODE_OPTIONS; ${envVars} ${timeoutCmd} ${opencodeInvocation}`
-                : `${envVars} ${opencodeInvocation}`;
+                ? `script -qec 'unset NODE_OPTIONS; ${envVars} timeout --signal=TERM --kill-after=10 150 ${opencodeCmd}' /dev/null`
+                : `${envVars} ${opencodeCmd}`;
+            const fullCmd = opencodeInvocation;
 
             console.log('[OpenCodeAgent] Running:', fullCmd.slice(0, 200));
             const result = await runCommand(fullCmd);

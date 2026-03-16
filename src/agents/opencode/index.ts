@@ -137,18 +137,19 @@ export class OpenCodeAgent extends BaseAgent {
             // heap alongside Ollama's model (~2.5 GB).
             const envVars = 'OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1 OPENCODE_DISABLE_PROJECT_CONFIG=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1';
             // On Linux, wrap with `script -qec` to allocate a pseudo-TTY.
-            // Bun on ARM64 Linux blocks on Bun.stdin.text() regardless of
-            // stdin source (pipe, file, /dev/null); only a real TTY
-            // (process.stdin.isTTY === true) skips that code path.
+            // Bun on ARM64 Linux blocks on Bun.stdin.text() when stdin is
+            // not a TTY.  `script` allocates a PTY so process.stdin.isTTY
+            // is true, skipping that code path entirely.  Do NOT add
+            // `< /dev/null` on Linux — it overrides the PTY stdin, making
+            // isTTY false again and defeating the whole purpose of script.
             // `timeout` must be INSIDE `script` — if outside, killing script
-            // orphans the opencode process inside the PTY, and Node.js spawn
-            // waits forever for the orphan's stdio pipes to close.
+            // orphans the opencode process inside the PTY.
             // On Windows, Git Bash ConPTY provides a TTY; /dev/null gives
             // immediate EOF for Bun.stdin.text().
-            const opencodeCmd = `${opencodeBin} run "$(cat /tmp/.prompt.md)" < /dev/null`;
+            const opencodeRun = `${opencodeBin} run "$(cat /tmp/.prompt.md)"`;
             const opencodeInvocation = process.platform !== 'win32'
-                ? `script -qec 'unset NODE_OPTIONS; ${envVars} timeout --signal=TERM --kill-after=10 150 ${opencodeCmd}' /dev/null`
-                : `${envVars} ${opencodeCmd}`;
+                ? `script -qec 'unset NODE_OPTIONS; ${envVars} timeout --signal=TERM --kill-after=10 150 ${opencodeRun}' /dev/null`
+                : `${envVars} ${opencodeRun} < /dev/null`;
             const fullCmd = opencodeInvocation;
 
             console.log('[OpenCodeAgent] Running:', fullCmd.slice(0, 200));

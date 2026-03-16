@@ -179,10 +179,11 @@ export class LLMGrader implements Grader {
         }
 
         // Include agent commands, filtering out infrastructure setup.
-        // Setup commands (base64 config injection, git init, container detection)
+        // Setup commands (base64 config injection, git init, container detection,
+        // Docker opencode install, and the opencode/timeout wrapper invocation)
         // bloat the transcript and confuse the grader — it extracts them as
         // commands_found and exhausts num_predict before reaching criteria.
-        const setupPattern = /^(cat \/proc|echo '([A-Za-z0-9+/=]{20,})'|base64\b|git init|pwd$)/;
+        const setupPattern = /^(cat \/proc|echo '([A-Za-z0-9+/=]{20,})'|base64\b|git init|pwd$|test -f \/\.dockerenv|which |npm install|unset NODE_OPTIONS|timeout )/;
         const commandEntries = sessionLog
             .filter((e: any) => e.type === 'command' && !setupPattern.test(e.command));
 
@@ -337,7 +338,7 @@ Respond with ONLY a JSON object: {"commands_found": ["cmd1", ...], "criteria": [
         // num_ctx 4096 gives headroom for longer transcripts + evidence extraction.
         // 300s timeout accommodates qwen3:4b on CPU (~5-10 tok/s with 4096 context).
         const OLLAMA_NUM_CTX = 4096;
-        const OLLAMA_NUM_PREDICT = 512;
+        const OLLAMA_NUM_PREDICT = 1024;
         const OLLAMA_TIMEOUT_MS = 300_000;
 
         const model = config.model || 'qwen3:4b';

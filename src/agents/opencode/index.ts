@@ -150,26 +150,24 @@ export class OpenCodeAgent extends BaseAgent {
 
             if (process.platform !== 'win32') {
                 const opencodeRun = `${opencodeBin} run "$(cat /tmp/.prompt.md)" < /dev/null`;
-                // Use `unbuffer` to force line-buffered output via PTY.
+                // Use `script --flush` to force line-buffered output via PTY.
                 // Without it, libc uses full buffering (~4-8 KB) when stdout
                 // is a file/pipe.  If timeout kills the process before the
-                // buffer fills, output is lost (0 bytes).  unbuffer allocates
-                // a per-command PTY that forces line buffering at the kernel
-                // level.  Falls back to plain execution if unbuffer isn't
-                // installed (output may be lost on timeout kill).
-                // NOTE: Do NOT use `unbuffer -p` (pipe mode) — it reads from
-                // stdin and exits on EOF, killing the child process before it
-                // can produce output when stdin is /dev/null.
+                // buffer fills, output is lost (0 bytes).
                 //
-                // unbuffer swallows exit codes (always returns 0) and
-                // kills the entire PTY process group on timeout, so exit
-                // code capture from *inside* is impossible.  The eval
-                // framework uses the returned output string, not the exit
-                // code, so this is acceptable — exit code is diagnostic only.
-                const ocExitFile = '/tmp/.opencode-exit';
-                const unbufCmd = 'command -v unbuffer >/dev/null 2>&1';
-                const timeoutCmd = `timeout --signal=TERM --kill-after=10 300 ${opencodeRun}`;
-                fullCmd = `unset NODE_OPTIONS; if ${unbufCmd}; then ${envVars} unbuffer ${timeoutCmd} > ${ocOutFile} 2>&1; else ${envVars} ${timeoutCmd} > ${ocOutFile} 2>&1; echo $? > ${ocExitFile}; fi`;
+                // `script` allocates a PTY session that forces kernel-level
+                // line buffering.  `--flush` flushes to the log file after
+                // each write.  `-e` preserves the child's exit code.
+                // An outer timeout prevents hangs if orphan processes hold
+                // the PTY session open (e.g. Ollama background processes).
+                //
+                // Why not `unbuffer`?  Without `-p`, Expect's `interact`
+                // requires stdout to be a terminal — fails silently with
+                // file redirect.  With `-p`, it exits on stdin EOF.
+                const timeoutCmd = `${envVars} timeout --signal=TERM --kill-after=10 300 ${opencodeRun}`;
+                const scriptCmd = `script --flush -qec "${timeoutCmd}" ${ocOutFile}`;
+                // Outer timeout = inner (300s) + kill-after (10s) + margin (10s)
+                fullCmd = `unset NODE_OPTIONS; timeout --signal=TERM --kill-after=10 320 ${scriptCmd} 2>/dev/null`;
             } else {
                 fullCmd = `${envVars} ${opencodeBin} run "$(cat /tmp/.prompt.md)" < /dev/null`;
             }
@@ -177,22 +175,29 @@ export class OpenCodeAgent extends BaseAgent {
             console.log('[OpenCodeAgent] Running:', fullCmd.slice(0, 250));
             const result = await runCommand(fullCmd);
 
-            // On Linux, read output from file.  Exit code comes from
-            // the exit file (non-unbuffer fallback) or defaults to 0
-            // (unbuffer branch — exit code is diagnostic only).
+            // On Linux, read output from script's log file.  Strip the
+            // "Script started/done" header/footer and PTY carriage returns.
+            // Extract exit code from the "COMMAND_EXIT_CODE" footer line.
             // On Windows, use pipe output + process exit code.
             let output: string;
             let exitCode: number;
 
             if (process.platform !== 'win32') {
                 const fileResult = await runCommand(`cat ${ocOutFile} 2>/dev/null || true`);
-                output = fileResult.stdout;
+                let raw = fileResult.stdout;
 
-                // Exit file only exists in the non-unbuffer fallback branch.
-                // When unbuffer is used, it swallows exit codes and the file
-                // won't exist — default to 0 (output content is what matters).
-                const exitResult = await runCommand(`cat /tmp/.opencode-exit 2>/dev/null || echo 0`);
-                exitCode = parseInt(exitResult.stdout.trim(), 10) || 0;
+                // Extract exit code from script's footer:
+                // Script done on ... [COMMAND_EXIT_CODE="124"]
+                const exitMatch = raw.match(/COMMAND_EXIT_CODE="(\d+)"/);
+                exitCode = exitMatch ? parseInt(exitMatch[1], 10) : result.exitCode;
+
+                // Strip script header/footer lines and PTY carriage returns
+                raw = raw
+                    .replace(/^Script started on [^\n]*\n/, '')
+                    .replace(/\nScript done on [^\n]*\n?$/, '')
+                    .replace(/\r/g, '');
+                output = raw;
+
                 console.log('[OpenCodeAgent] Read output from file:', output.length, 'bytes, exit code:', exitCode);
             } else {
                 output = result.stdout + (result.stderr ? '\n' + result.stderr : '');

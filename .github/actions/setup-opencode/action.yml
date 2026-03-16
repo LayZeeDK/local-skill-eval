@@ -8,13 +8,6 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - name: Install unbuffer (expect)
-      shell: bash
-      run: |
-        # unbuffer forces line-buffered output via PTY — required because
-        # Bun (opencode's runtime) uses libc full buffering when stdout is
-        # a pipe/file, and timeout kills the process before flushing.
-        sudo apt-get install -y -qq expect
     - name: Install and verify OpenCode
       shell: bash
       run: |

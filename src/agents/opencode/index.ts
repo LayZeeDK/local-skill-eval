@@ -150,13 +150,16 @@ export class OpenCodeAgent extends BaseAgent {
 
             if (process.platform !== 'win32') {
                 const opencodeRun = `${opencodeBin} run "$(cat /tmp/.prompt.md)" < /dev/null`;
-                // Use `unbuffer -p` to force line-buffered output via PTY.
+                // Use `unbuffer` to force line-buffered output via PTY.
                 // Without it, libc uses full buffering (~4-8 KB) when stdout
                 // is a file/pipe.  If timeout kills the process before the
                 // buffer fills, output is lost (0 bytes).  unbuffer allocates
                 // a per-command PTY that forces line buffering at the kernel
                 // level.  Falls back to plain execution if unbuffer isn't
                 // installed (output may be lost on timeout kill).
+                // NOTE: Do NOT use `unbuffer -p` (pipe mode) — it reads from
+                // stdin and exits on EOF, killing the child process before it
+                // can produce output when stdin is /dev/null.
                 //
                 // unbuffer swallows exit codes (always returns 0) and
                 // kills the entire PTY process group on timeout, so exit
@@ -166,7 +169,7 @@ export class OpenCodeAgent extends BaseAgent {
                 const ocExitFile = '/tmp/.opencode-exit';
                 const unbufCmd = 'command -v unbuffer >/dev/null 2>&1';
                 const timeoutCmd = `timeout --signal=TERM --kill-after=10 300 ${opencodeRun}`;
-                fullCmd = `unset NODE_OPTIONS; if ${unbufCmd}; then ${envVars} unbuffer -p ${timeoutCmd} > ${ocOutFile} 2>&1; else ${envVars} ${timeoutCmd} > ${ocOutFile} 2>&1; echo $? > ${ocExitFile}; fi`;
+                fullCmd = `unset NODE_OPTIONS; if ${unbufCmd}; then ${envVars} unbuffer ${timeoutCmd} > ${ocOutFile} 2>&1; else ${envVars} ${timeoutCmd} > ${ocOutFile} 2>&1; echo $? > ${ocExitFile}; fi`;
             } else {
                 fullCmd = `${envVars} ${opencodeBin} run "$(cat /tmp/.prompt.md)" < /dev/null`;
             }

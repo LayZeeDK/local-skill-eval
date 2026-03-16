@@ -183,6 +183,10 @@ export class OpenCodeAgent extends BaseAgent {
             let exitCode: number;
 
             if (process.platform !== 'win32') {
+                // Diagnostics: check file state before reading
+                const diagResult = await runCommand(`ls -la ${ocOutFile} 2>&1; echo "---"; wc -c ${ocOutFile} 2>&1; echo "---"; head -c 500 ${ocOutFile} 2>&1 | cat -v`);
+                console.log('[OpenCodeAgent] File diagnostics:', diagResult.stdout.trim());
+
                 const fileResult = await runCommand(`cat ${ocOutFile} 2>/dev/null || true`);
                 let raw = fileResult.stdout;
 
@@ -198,7 +202,7 @@ export class OpenCodeAgent extends BaseAgent {
                     .replace(/\r/g, '');
                 output = raw;
 
-                console.log('[OpenCodeAgent] Read output from file:', output.length, 'bytes, exit code:', exitCode);
+                console.log('[OpenCodeAgent] Raw file:', raw.length, 'bytes -> stripped:', output.length, 'bytes, exit code:', exitCode);
             } else {
                 output = result.stdout + (result.stderr ? '\n' + result.stderr : '');
                 exitCode = result.exitCode;

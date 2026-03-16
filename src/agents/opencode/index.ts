@@ -123,10 +123,10 @@ export class OpenCodeAgent extends BaseAgent {
             //    Use OPENCODE_BIN_PATH for local provider (CI setup-opencode sets it);
             //    inside Docker, opencode is installed in-container and on PATH.
             const opencodeBin = (!inDocker && process.env.OPENCODE_BIN_PATH) || 'opencode';
-            // Unset NODE_OPTIONS — it leaks V8-specific flags (e.g.
-            // --max-old-space-size) into Bun (opencode's runtime) which uses
-            // JavaScriptCore, not V8.  This causes silent hangs on ARM64 Linux.
-            // Docker is unaffected because containers get a clean environment.
+            // Unset NODE_OPTIONS — V8-specific flags (e.g. --max-old-space-size)
+            // leak into Bun (opencode's runtime, JavaScriptCore) and can cause
+            // OOM on memory-constrained runners by inflating the parent Node.js
+            // heap alongside Ollama's model (~2.5 GB).
             const envVars = 'OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1 OPENCODE_DISABLE_PROJECT_CONFIG=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1';
             const opencodeInvocation = `${opencodeBin} run "$(cat /tmp/.prompt.md)" < /tmp/.prompt.md`;
 
@@ -153,8 +153,11 @@ export class OpenCodeAgent extends BaseAgent {
                 'stdout:', result.stdout.length, 'bytes, stderr:', result.stderr.length, 'bytes',
             );
 
-            if (result.exitCode !== 0 && !killedByTimeout) {
+            if (result.stderr.length > 0) {
                 console.error('[OpenCodeAgent] stderr:', result.stderr.slice(0, 500));
+            }
+
+            if (result.exitCode !== 0 && !killedByTimeout) {
                 console.error('[OpenCodeAgent] stdout (tail):', result.stdout.slice(-500));
             }
 

@@ -126,54 +126,30 @@ export class OpenCodeAgent extends BaseAgent {
             const envVars = 'OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1 OPENCODE_DISABLE_PROJECT_CONFIG=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1';
             const opencodeInvocation = `${opencodeBin} run "$(cat /tmp/.prompt.md)" < /tmp/.prompt.md`;
 
-            // 570s leaves 30s buffer before the 600s evalRunner timeout.
-            // env vars go BEFORE timeout so the shell handles them;
-            // timeout uses execvp(), so it needs a real binary as argv[0].
+            // 150s is ~2x the typical agent duration (80s).  On ARM64 Linux,
+            // opencode (Bun) hangs after completing work; the timeout kills it
+            // and we still get the captured stdout.  env vars go BEFORE timeout
+            // so the shell handles them; timeout uses execvp() and needs a real
+            // binary as argv[0].
             const timeoutCmd = process.platform !== 'win32'
-                ? 'timeout --signal=TERM --kill-after=10 570'
+                ? 'timeout --signal=TERM --kill-after=10 150'
                 : '';
-            const innerCmd = timeoutCmd
+            const fullCmd = timeoutCmd
                 ? `${envVars} ${timeoutCmd} ${opencodeInvocation}`
                 : `${envVars} ${opencodeInvocation}`;
 
-            // Diagnostic: on Linux local provider, run strace in the
-            // background to capture what syscall the process blocks on
-            // when Bun hangs after completing work.  Writes to /tmp so
-            // it doesn't pollute the workspace.
-            const diagnose = process.platform === 'linux' && !inDocker;
-            const fullCmd = diagnose
-                ? [
-                    // Launch strace on the process tree, following forks
-                    `${innerCmd} &`,
-                    'OPENCODE_PID=$!',
-                    'echo "[diag] opencode pid=$OPENCODE_PID"',
-                    // Snapshot open fds after 5s (before it hangs)
-                    '(sleep 5 && ls -la /proc/$OPENCODE_PID/fd 2>/dev/null > /tmp/.opencode-fds-early.txt) &',
-                    // Snapshot after 60s (likely hung by then)
-                    '(sleep 60 && ls -la /proc/$OPENCODE_PID/fd 2>/dev/null > /tmp/.opencode-fds-late.txt && cat /proc/$OPENCODE_PID/stack 2>/dev/null > /tmp/.opencode-stack.txt && cat /proc/$OPENCODE_PID/status 2>/dev/null > /tmp/.opencode-status.txt) &',
-                    // Wait for opencode (or timeout to kill it)
-                    'wait $OPENCODE_PID 2>/dev/null',
-                    'EXIT_CODE=$?',
-                    'echo "[diag] opencode exited with $EXIT_CODE"',
-                    'echo "[diag] === early fds ==="',
-                    'cat /tmp/.opencode-fds-early.txt 2>/dev/null || echo "(not captured)"',
-                    'echo "[diag] === late fds ==="',
-                    'cat /tmp/.opencode-fds-late.txt 2>/dev/null || echo "(not captured)"',
-                    'echo "[diag] === kernel stack ==="',
-                    'cat /tmp/.opencode-stack.txt 2>/dev/null || echo "(not captured)"',
-                    'echo "[diag] === process status ==="',
-                    'cat /tmp/.opencode-status.txt 2>/dev/null || echo "(not captured)"',
-                    'echo "[diag] === process tree ==="',
-                    'ps auxf 2>/dev/null | head -40',
-                    'exit $EXIT_CODE',
-                  ].join('\n')
-                : innerCmd;
-
-            console.log('[OpenCodeAgent] Running:', (diagnose ? '[with diagnostics] ' : '') + innerCmd.slice(0, 200));
+            console.log('[OpenCodeAgent] Running:', fullCmd.slice(0, 200));
             const result = await runCommand(fullCmd);
-            console.log('[OpenCodeAgent] exit:', result.exitCode, 'stdout:', result.stdout.length, 'bytes, stderr:', result.stderr.length, 'bytes');
+            // exit 124 = timeout sent SIGTERM (expected on ARM64 Linux where
+            // Bun hangs after completing work).  The agent output is still valid.
+            const killedByTimeout = result.exitCode === 124 || result.exitCode === 137;
+            console.log(
+                '[OpenCodeAgent] exit:', result.exitCode,
+                killedByTimeout ? '(killed by timeout -- expected Bun ARM64 hang)' : '',
+                'stdout:', result.stdout.length, 'bytes, stderr:', result.stderr.length, 'bytes',
+            );
 
-            if (result.exitCode !== 0) {
+            if (result.exitCode !== 0 && !killedByTimeout) {
                 console.error('[OpenCodeAgent] stderr:', result.stderr.slice(0, 500));
                 console.error('[OpenCodeAgent] stdout (tail):', result.stdout.slice(-500));
             }

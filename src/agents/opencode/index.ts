@@ -128,11 +128,14 @@ export class OpenCodeAgent extends BaseAgent {
             // OOM on memory-constrained runners by inflating the parent Node.js
             // heap alongside Ollama's model (~2.5 GB).
             const envVars = 'OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1 OPENCODE_DISABLE_PROJECT_CONFIG=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1';
-            // Do NOT redirect stdin (< /tmp/.prompt.md) — opencode's run.ts
-            // calls Bun.stdin.text() when stdin is a pipe, which blocks
-            // indefinitely on ARM64 Linux.  Passing the prompt as a CLI arg
-            // bypasses that code path entirely.
-            const opencodeInvocation = `${opencodeBin} run "$(cat /tmp/.prompt.md)"`;
+            // Redirect stdin from /dev/null — opencode's run.ts calls
+            // Bun.stdin.text() when stdin is not a TTY, which blocks
+            // indefinitely on ARM64 Linux.  Node.js spawn uses pipe stdio
+            // by default (not a TTY), so even without a file redirect,
+            // stdin is a pipe that never sends EOF.  /dev/null gives
+            // immediate EOF, letting Bun.stdin.text() return instantly.
+            // The prompt is passed as a CLI arg via $(cat ...).
+            const opencodeInvocation = `${opencodeBin} run "$(cat /tmp/.prompt.md)" < /dev/null`;
 
             // 150s is ~2x the typical agent duration (80s).  On ARM64 Linux,
             // opencode (Bun) may hang after completing work; the timeout kills

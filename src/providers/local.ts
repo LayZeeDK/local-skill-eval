@@ -142,8 +142,19 @@ export class LocalProvider implements EnvironmentProvider {
             child.stdout.on('data', (data) => { stdout += data.toString(); });
             child.stderr.on('data', (data) => { stderr += data.toString(); });
 
-            child.on('close', (code) => {
-                resolve({ stdout, stderr, exitCode: code ?? 1 });
+            // Use 'exit' instead of 'close' — 'close' waits for ALL
+            // stdio pipe fds to close, which can hang when orphan
+            // processes inherit pipe fds.  With file redirect (> file
+            // 2>&1), orphans inherit the file fd instead, so 'close'
+            // would work.  But 'exit' is strictly safer since it fires
+            // as soon as the bash process exits regardless of fd state.
+            child.on('exit', (code) => {
+                setTimeout(() => {
+                    child.stdout.destroy();
+                    child.stderr.destroy();
+                    child.stdin.destroy();
+                    resolve({ stdout, stderr, exitCode: code ?? 1 });
+                }, 500);
             });
 
             child.on('error', () => {

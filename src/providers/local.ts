@@ -142,8 +142,20 @@ export class LocalProvider implements EnvironmentProvider {
             child.stdout.on('data', (data) => { stdout += data.toString(); });
             child.stderr.on('data', (data) => { stderr += data.toString(); });
 
-            child.on('close', (code) => {
-                resolve({ stdout, stderr, exitCode: code ?? 1 });
+            // Use 'exit' instead of 'close' — 'close' waits for ALL
+            // stdio pipe fds to be closed, which hangs when orphan
+            // processes (e.g. Ollama) inherit the pipe write end.
+            // 'exit' fires when the bash process itself exits.
+            // Give a short grace period for buffered pipe data to drain.
+            child.on('exit', (code) => {
+                setTimeout(() => {
+                    // Destroy stdio to unblock any pending reads and
+                    // prevent orphan fd holders from keeping Node alive.
+                    child.stdout.destroy();
+                    child.stderr.destroy();
+                    child.stdin.destroy();
+                    resolve({ stdout, stderr, exitCode: code ?? 1 });
+                }, 500);
             });
 
             child.on('error', () => {

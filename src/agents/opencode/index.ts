@@ -133,39 +133,48 @@ export class OpenCodeAgent extends BaseAgent {
             const envVars = 'OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1 OPENCODE_DISABLE_PROJECT_CONFIG=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1';
             // Redirect stdin from /dev/null so Bun.stdin.text() gets
             // immediate EOF instead of blocking on Node.js spawn's pipe.
-            // opencode writes output to stderr (via UI.println) when stdout
-            // is not a TTY.  The agent captures both channels.
-            const opencodeRun = `${opencodeBin} run "$(cat /tmp/.prompt.md)" < /dev/null`;
+            //
+            // On Linux, the local provider spawns bash with pipe stdio
+            // (no TTY).  libc then uses full buffering (~4-8 KB) for
+            // stdout/stderr.  If `timeout` kills opencode before the
+            // buffer fills, the output never reaches the pipe → 0 bytes.
+            // The Docker provider avoids this with `Tty: true` in exec.
+            //
+            // Fix: wrap with `script -qec` to allocate a pseudo-TTY.
+            // PTYs force line buffering at the kernel level, so each
+            // newline-terminated line reaches the pipe immediately.
+            // `timeout` goes INSIDE the script session so it can signal
+            // the opencode process group directly.
+            // 600s timeout accommodates ARM64 CI Ollama inference speed.
+            let fullCmd: string;
 
-            // On Linux, wrap with coreutils `timeout` for process-level kill.
-            // 150s is ~2x typical agent duration (80s).
-            const timeoutCmd = process.platform !== 'win32'
-                ? 'timeout --signal=TERM --kill-after=10 150'
-                : '';
-            const fullCmd = timeoutCmd
-                ? `unset NODE_OPTIONS; ${envVars} ${timeoutCmd} ${opencodeRun}`
-                : `${envVars} ${opencodeRun}`;
+            if (process.platform !== 'win32') {
+                const innerCmd = `unset NODE_OPTIONS; ${envVars} timeout --signal=TERM --kill-after=10 600 ${opencodeBin} run "$(cat /tmp/.prompt.md)" < /dev/null`;
+                fullCmd = `script -qec '${innerCmd.replace(/'/g, "'\\''")}' /dev/null`;
+            } else {
+                fullCmd = `${envVars} ${opencodeBin} run "$(cat /tmp/.prompt.md)" < /dev/null`;
+            }
 
             console.log('[OpenCodeAgent] Running:', fullCmd.slice(0, 200));
             const result = await runCommand(fullCmd);
             // exit 124 = timeout sent SIGTERM (expected on ARM64 Linux where
             // Bun hangs after completing work).  The agent output is still valid.
             const killedByTimeout = result.exitCode === 124 || result.exitCode === 137;
+            // script merges stderr into stdout through the PTY, so all
+            // output is in result.stdout.  result.stderr may be empty.
+            const output = result.stdout + (result.stderr ? '\n' + result.stderr : '');
+
             console.log(
                 '[OpenCodeAgent] exit:', result.exitCode,
                 killedByTimeout ? '(killed by timeout -- expected Bun ARM64 hang)' : '',
-                'stdout:', result.stdout.length, 'bytes, stderr:', result.stderr.length, 'bytes',
+                'output:', output.length, 'bytes',
             );
 
-            if (result.stderr.length > 0) {
-                console.error('[OpenCodeAgent] stderr:', result.stderr.slice(0, 500));
-            }
-
             if (result.exitCode !== 0 && !killedByTimeout) {
-                console.error('[OpenCodeAgent] stdout (tail):', result.stdout.slice(-500));
+                console.error('[OpenCodeAgent] output (tail):', output.slice(-500));
             }
 
-            return result.stdout + '\n' + result.stderr;
+            return output;
         } finally {
             // 6. Unload model and wait for eviction so the LLM grader
             //    (qwen2.5:3b) can load without memory contention.

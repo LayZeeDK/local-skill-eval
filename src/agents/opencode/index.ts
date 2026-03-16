@@ -131,14 +131,25 @@ export class OpenCodeAgent extends BaseAgent {
             // OOM on memory-constrained runners by inflating the parent Node.js
             // heap alongside Ollama's model (~2.5 GB).
             const envVars = 'OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1 OPENCODE_DISABLE_PROJECT_CONFIG=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1';
-            // Redirect stdin from /dev/null — opencode's run.ts calls
-            // Bun.stdin.text() when stdin is not a TTY, which blocks
-            // indefinitely on ARM64 Linux.  Node.js spawn uses pipe stdio
-            // by default (not a TTY), so even without a file redirect,
-            // stdin is a pipe that never sends EOF.  /dev/null gives
-            // immediate EOF, letting Bun.stdin.text() return instantly.
-            // The prompt is passed as a CLI arg via $(cat ...).
-            const opencodeInvocation = `${opencodeBin} run "$(cat /tmp/.prompt.md)" < /dev/null`;
+            // On Linux, wrap with `script -qec` to allocate a pseudo-TTY.
+            // opencode's run.ts calls Bun.stdin.text() when stdin is not a
+            // TTY, which blocks indefinitely on ARM64 Linux — regardless of
+            // whether stdin is a pipe, file, or /dev/null.  The only bypass
+            // is making process.stdin.isTTY === true.  `script` allocates a
+            // PTY, matching Docker's Tty:true behavior.  The trailing
+            // /dev/null is script's typescript file (discard it).
+            // On Windows, Git Bash provides a ConPTY so no wrapper is needed.
+            // Redirect stdin from /dev/null on all platforms — opencode's
+            // run.ts calls Bun.stdin.text() when stdin is not a TTY.
+            // On Windows (Git Bash ConPTY) /dev/null gives immediate EOF.
+            // On Linux, also wrap with `script -qec` to allocate a PTY —
+            // Bun on ARM64 Linux blocks on Bun.stdin.text() regardless of
+            // stdin source (pipe, file, /dev/null); only a real TTY
+            // (process.stdin.isTTY === true) skips that code path.
+            const opencodeCmd = `${opencodeBin} run "$(cat /tmp/.prompt.md)" < /dev/null`;
+            const opencodeInvocation = process.platform !== 'win32'
+                ? `script -qec '${opencodeCmd}' /dev/null`
+                : opencodeCmd;
 
             // 150s is ~2x the typical agent duration (80s).  On ARM64 Linux,
             // opencode (Bun) may hang after completing work; the timeout kills

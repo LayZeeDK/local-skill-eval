@@ -145,11 +145,11 @@ export class OpenCodeAgent extends BaseAgent {
             // newline-terminated line reaches the pipe immediately.
             // `timeout` goes INSIDE the script session so it can signal
             // the opencode process group directly.
-            // 600s timeout accommodates ARM64 CI Ollama inference speed.
+            // 300s timeout accommodates ARM64 CI Ollama inference speed.
             let fullCmd: string;
 
             if (process.platform !== 'win32') {
-                const innerCmd = `unset NODE_OPTIONS; ${envVars} timeout --signal=TERM --kill-after=10 600 ${opencodeBin} run "$(cat /tmp/.prompt.md)" < /dev/null`;
+                const innerCmd = `unset NODE_OPTIONS; ${envVars} timeout --signal=TERM --kill-after=10 300 ${opencodeBin} run "$(cat /tmp/.prompt.md)" < /dev/null`;
                 fullCmd = `script -qec '${innerCmd.replace(/'/g, "'\\''")}' /dev/null`;
             } else {
                 fullCmd = `${envVars} ${opencodeBin} run "$(cat /tmp/.prompt.md)" < /dev/null`;

@@ -131,23 +131,20 @@ export class OpenCodeAgent extends BaseAgent {
             // OOM on memory-constrained runners by inflating the parent Node.js
             // heap alongside Ollama's model (~2.5 GB).
             const envVars = 'OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1 OPENCODE_DISABLE_PROJECT_CONFIG=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1';
-            // On Linux, wrap with `script -qec` to allocate a pseudo-TTY.
-            // Bun on ARM64 Linux blocks on Bun.stdin.text() when stdin is
-            // not a TTY.  `script` allocates a PTY so process.stdin.isTTY
-            // is true, skipping that code path entirely.  Do NOT add
-            // `< /dev/null` on Linux — it overrides the PTY stdin, making
-            // isTTY false again and defeating the whole purpose of script.
-            // `timeout` must be INSIDE `script` — if outside, killing script
-            // orphans the opencode process inside the PTY.
-            // On Windows, Git Bash ConPTY provides a TTY; /dev/null gives
-            // immediate EOF for Bun.stdin.text().
-            const opencodeRun = `${opencodeBin} run "$(cat /tmp/.prompt.md)"`;
-            // Diagnostic: verify PTY allocation before invoking opencode
-            const ttyCheck = 'echo "TTY=$(tty) isatty=$(test -t 0 && echo yes || echo no)" >&2;';
-            const opencodeInvocation = process.platform !== 'win32'
-                ? `script -qec '${ttyCheck} unset NODE_OPTIONS; ${envVars} timeout --signal=TERM --kill-after=10 150 ${opencodeRun}' /dev/null`
-                : `${envVars} ${opencodeRun} < /dev/null`;
-            const fullCmd = opencodeInvocation;
+            // Redirect stdin from /dev/null so Bun.stdin.text() gets
+            // immediate EOF instead of blocking on Node.js spawn's pipe.
+            // opencode writes output to stderr (via UI.println) when stdout
+            // is not a TTY.  The agent captures both channels.
+            const opencodeRun = `${opencodeBin} run "$(cat /tmp/.prompt.md)" < /dev/null`;
+
+            // On Linux, wrap with coreutils `timeout` for process-level kill.
+            // 150s is ~2x typical agent duration (80s).
+            const timeoutCmd = process.platform !== 'win32'
+                ? 'timeout --signal=TERM --kill-after=10 150'
+                : '';
+            const fullCmd = timeoutCmd
+                ? `unset NODE_OPTIONS; ${envVars} ${timeoutCmd} ${opencodeRun}`
+                : `${envVars} ${opencodeRun}`;
 
             console.log('[OpenCodeAgent] Running:', fullCmd.slice(0, 200));
             const result = await runCommand(fullCmd);

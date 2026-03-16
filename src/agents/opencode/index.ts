@@ -123,19 +123,23 @@ export class OpenCodeAgent extends BaseAgent {
             //    Use OPENCODE_BIN_PATH for local provider (CI setup-opencode sets it);
             //    inside Docker, opencode is installed in-container and on PATH.
             const opencodeBin = (!inDocker && process.env.OPENCODE_BIN_PATH) || 'opencode';
+            // Unset NODE_OPTIONS — it leaks V8-specific flags (e.g.
+            // --max-old-space-size) into Bun (opencode's runtime) which uses
+            // JavaScriptCore, not V8.  This causes silent hangs on ARM64 Linux.
+            // Docker is unaffected because containers get a clean environment.
             const envVars = 'OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1 OPENCODE_DISABLE_PROJECT_CONFIG=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1';
             const opencodeInvocation = `${opencodeBin} run "$(cat /tmp/.prompt.md)" < /tmp/.prompt.md`;
 
             // 150s is ~2x the typical agent duration (80s).  On ARM64 Linux,
-            // opencode (Bun) hangs after completing work; the timeout kills it
-            // and we still get the captured stdout.  env vars go BEFORE timeout
-            // so the shell handles them; timeout uses execvp() and needs a real
-            // binary as argv[0].
+            // opencode (Bun) may hang after completing work; the timeout kills
+            // it and we still get the captured stdout.  env vars go BEFORE
+            // timeout so the shell handles them; timeout uses execvp() and
+            // needs a real binary as argv[0].
             const timeoutCmd = process.platform !== 'win32'
                 ? 'timeout --signal=TERM --kill-after=10 150'
                 : '';
             const fullCmd = timeoutCmd
-                ? `${envVars} ${timeoutCmd} ${opencodeInvocation}`
+                ? `unset NODE_OPTIONS; ${envVars} ${timeoutCmd} ${opencodeInvocation}`
                 : `${envVars} ${opencodeInvocation}`;
 
             console.log('[OpenCodeAgent] Running:', fullCmd.slice(0, 200));

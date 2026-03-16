@@ -122,7 +122,10 @@ export class OpenCodeAgent extends BaseAgent {
             //    a different command; rely on evalRunner's promise timeout there.
             //    Use OPENCODE_BIN_PATH for local provider (CI setup-opencode sets it);
             //    inside Docker, opencode is installed in-container and on PATH.
-            const opencodeBin = (!inDocker && process.env.OPENCODE_BIN_PATH) || 'opencode';
+            const opencodeBinRaw = (!inDocker && process.env.OPENCODE_BIN_PATH) || 'opencode';
+            // Convert Windows backslashes to forward slashes — Git Bash
+            // interprets backslashes as escape sequences in command strings.
+            const opencodeBin = opencodeBinRaw.replace(/\\/g, '/');
             // Unset NODE_OPTIONS — V8-specific flags (e.g. --max-old-space-size)
             // leak into Bun (opencode's runtime, JavaScriptCore) and can cause
             // OOM on memory-constrained runners by inflating the parent Node.js

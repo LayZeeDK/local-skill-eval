@@ -157,36 +157,56 @@ export class OpenCodeAgent extends BaseAgent {
                 // a per-command PTY that forces line buffering at the kernel
                 // level.  Falls back to plain execution if unbuffer isn't
                 // installed (output may be lost on timeout kill).
-                const unbuf = 'command -v unbuffer >/dev/null 2>&1 && echo unbuffer -p';
-                fullCmd = `unset NODE_OPTIONS; ${envVars} timeout --signal=TERM --kill-after=10 300 $(${unbuf}) ${opencodeRun} > ${ocOutFile} 2>&1`;
+                //
+                // unbuffer swallows exit codes (always returns 0) and
+                // kills the entire PTY process group on timeout, so exit
+                // code capture from *inside* is impossible.  The eval
+                // framework uses the returned output string, not the exit
+                // code, so this is acceptable — exit code is diagnostic only.
+                const ocExitFile = '/tmp/.opencode-exit';
+                const unbufCmd = 'command -v unbuffer >/dev/null 2>&1';
+                const timeoutCmd = `timeout --signal=TERM --kill-after=10 300 ${opencodeRun}`;
+                fullCmd = `unset NODE_OPTIONS; if ${unbufCmd}; then ${envVars} unbuffer -p ${timeoutCmd} > ${ocOutFile} 2>&1; else ${envVars} ${timeoutCmd} > ${ocOutFile} 2>&1; echo $? > ${ocExitFile}; fi`;
             } else {
                 fullCmd = `${envVars} ${opencodeBin} run "$(cat /tmp/.prompt.md)" < /dev/null`;
             }
 
             console.log('[OpenCodeAgent] Running:', fullCmd.slice(0, 250));
             const result = await runCommand(fullCmd);
-            // exit 124 = timeout sent SIGTERM (expected on ARM64 Linux where
-            // Bun hangs after completing work).  The agent output is still valid.
-            const killedByTimeout = result.exitCode === 124 || result.exitCode === 137;
 
-            // On Linux, read output from file.  On Windows, use pipe output.
+            // On Linux, read output from file.  Exit code comes from
+            // the exit file (non-unbuffer fallback) or defaults to 0
+            // (unbuffer branch — exit code is diagnostic only).
+            // On Windows, use pipe output + process exit code.
             let output: string;
+            let exitCode: number;
 
             if (process.platform !== 'win32') {
                 const fileResult = await runCommand(`cat ${ocOutFile} 2>/dev/null || true`);
                 output = fileResult.stdout;
-                console.log('[OpenCodeAgent] Read output from file:', output.length, 'bytes');
+
+                // Exit file only exists in the non-unbuffer fallback branch.
+                // When unbuffer is used, it swallows exit codes and the file
+                // won't exist — default to 0 (output content is what matters).
+                const exitResult = await runCommand(`cat /tmp/.opencode-exit 2>/dev/null || echo 0`);
+                exitCode = parseInt(exitResult.stdout.trim(), 10) || 0;
+                console.log('[OpenCodeAgent] Read output from file:', output.length, 'bytes, exit code:', exitCode);
             } else {
                 output = result.stdout + (result.stderr ? '\n' + result.stderr : '');
+                exitCode = result.exitCode;
             }
 
+            // exit 124 = timeout sent SIGTERM (expected on ARM64 Linux where
+            // Bun hangs after completing work).  The agent output is still valid.
+            const killedByTimeout = exitCode === 124 || exitCode === 137;
+
             console.log(
-                '[OpenCodeAgent] exit:', result.exitCode,
+                '[OpenCodeAgent] exit:', exitCode,
                 killedByTimeout ? '(killed by timeout -- expected Bun ARM64 hang)' : '',
                 'output:', output.length, 'bytes',
             );
 
-            if (result.exitCode !== 0 && !killedByTimeout) {
+            if (exitCode !== 0 && !killedByTimeout) {
                 console.error('[OpenCodeAgent] output (tail):', output.slice(-500));
             }
 

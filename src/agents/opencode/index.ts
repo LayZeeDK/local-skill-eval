@@ -140,29 +140,37 @@ export class OpenCodeAgent extends BaseAgent {
             // buffer fills, the output never reaches the pipe → 0 bytes.
             // The Docker provider avoids this with `Tty: true` in exec.
             //
-            // Fix: wrap with `script -qec` to allocate a pseudo-TTY.
-            // PTYs force line buffering at the kernel level, so each
-            // newline-terminated line reaches the pipe immediately.
-            // `timeout` goes INSIDE the script session so it can signal
-            // the opencode process group directly.
+            // Fix: redirect all output to a file and read it back after
+            // the command completes (or is killed by timeout).  Even if
+            // the process buffer isn't fully flushed, any previously-
+            // flushed content is preserved in the file.
             // 300s timeout accommodates ARM64 CI Ollama inference speed.
+            const ocOutFile = '/tmp/.opencode-output.log';
             let fullCmd: string;
 
             if (process.platform !== 'win32') {
-                const innerCmd = `unset NODE_OPTIONS; ${envVars} timeout --signal=TERM --kill-after=10 300 ${opencodeBin} run "$(cat /tmp/.prompt.md)" < /dev/null`;
-                fullCmd = `script -qec '${innerCmd.replace(/'/g, "'\\''")}' /dev/null`;
+                const opencodeRun = `${opencodeBin} run "$(cat /tmp/.prompt.md)" < /dev/null`;
+                fullCmd = `unset NODE_OPTIONS; ${envVars} timeout --signal=TERM --kill-after=10 300 ${opencodeRun} > ${ocOutFile} 2>&1`;
             } else {
                 fullCmd = `${envVars} ${opencodeBin} run "$(cat /tmp/.prompt.md)" < /dev/null`;
             }
 
-            console.log('[OpenCodeAgent] Running:', fullCmd.slice(0, 200));
+            console.log('[OpenCodeAgent] Running:', fullCmd.slice(0, 250));
             const result = await runCommand(fullCmd);
             // exit 124 = timeout sent SIGTERM (expected on ARM64 Linux where
             // Bun hangs after completing work).  The agent output is still valid.
             const killedByTimeout = result.exitCode === 124 || result.exitCode === 137;
-            // script merges stderr into stdout through the PTY, so all
-            // output is in result.stdout.  result.stderr may be empty.
-            const output = result.stdout + (result.stderr ? '\n' + result.stderr : '');
+
+            // On Linux, read output from file.  On Windows, use pipe output.
+            let output: string;
+
+            if (process.platform !== 'win32') {
+                const fileResult = await runCommand(`cat ${ocOutFile} 2>/dev/null || true`);
+                output = fileResult.stdout;
+                console.log('[OpenCodeAgent] Read output from file:', output.length, 'bytes');
+            } else {
+                output = result.stdout + (result.stderr ? '\n' + result.stderr : '');
+            }
 
             console.log(
                 '[OpenCodeAgent] exit:', result.exitCode,

@@ -150,7 +150,15 @@ export class OpenCodeAgent extends BaseAgent {
 
             if (process.platform !== 'win32') {
                 const opencodeRun = `${opencodeBin} run "$(cat /tmp/.prompt.md)" < /dev/null`;
-                fullCmd = `unset NODE_OPTIONS; ${envVars} timeout --signal=TERM --kill-after=10 300 ${opencodeRun} > ${ocOutFile} 2>&1`;
+                // Use `unbuffer -p` to force line-buffered output via PTY.
+                // Without it, libc uses full buffering (~4-8 KB) when stdout
+                // is a file/pipe.  If timeout kills the process before the
+                // buffer fills, output is lost (0 bytes).  unbuffer allocates
+                // a per-command PTY that forces line buffering at the kernel
+                // level.  Falls back to plain execution if unbuffer isn't
+                // installed (output may be lost on timeout kill).
+                const unbuf = 'command -v unbuffer >/dev/null 2>&1 && echo unbuffer -p';
+                fullCmd = `unset NODE_OPTIONS; ${envVars} timeout --signal=TERM --kill-after=10 300 $(${unbuf}) ${opencodeRun} > ${ocOutFile} 2>&1`;
             } else {
                 fullCmd = `${envVars} ${opencodeBin} run "$(cat /tmp/.prompt.md)" < /dev/null`;
             }

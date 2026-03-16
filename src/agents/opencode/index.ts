@@ -29,7 +29,7 @@ export class OpenCodeAgent extends BaseAgent {
 
     constructor() {
         super();
-        this.ollamaClient = new Ollama({ host: 'http://localhost:11434' });
+        this.ollamaClient = new Ollama({ host: 'http://127.0.0.1:11434' });
     }
 
     async run(

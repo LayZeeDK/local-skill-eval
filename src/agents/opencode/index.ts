@@ -125,7 +125,7 @@ export class OpenCodeAgent extends BaseAgent {
             const configCheck = await runCommand('cat opencode.json 2>/dev/null | head -5 || echo "[WARN] opencode.json missing"');
             console.log('[OpenCodeAgent] opencode.json (head):', configCheck.stdout.slice(0, 300).trim());
 
-            const versionCheck = await runCommand(`timeout 10 ${opencodeBin} --version 2>&1 || echo "[WARN] --version failed/timed-out"`);
+            const versionCheck = await runCommand(`unset NODE_OPTIONS; timeout 10 ${opencodeBin} --version 2>&1 || echo "[WARN] --version failed/timed-out"`);
             console.log('[OpenCodeAgent] --version:', versionCheck.stdout.slice(0, 100).trim());
 
             // Unset NODE_OPTIONS — V8-specific flags (e.g. --max-old-space-size)

@@ -82,8 +82,6 @@ jobs:
         uses: ./.github/actions/setup-opencode
       - name: Run agent eval
         timeout-minutes: 15
-        env:
-          NODE_OPTIONS: '--max-old-space-size=256'
         run: npx tsx src/cli.ts superlint_demo --agent=opencode --provider=local --trials=1
       - name: Preview results
         if: always()

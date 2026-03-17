@@ -60,11 +60,11 @@ jobs:
           name: eval-results-validate
           path: results/
 
-  # ---------- opencode / local (the one we're debugging) ----------
+  # ---------- opencode / local ----------
   opencode-local:
     name: Agent Eval (opencode/local)
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node
@@ -80,46 +80,6 @@ jobs:
               as: qwen3-4b-skill-eval-opencode-agent
       - name: Setup OpenCode
         uses: ./.github/actions/setup-opencode
-      - name: PTY smoke test
-        run: |
-          echo "--- Layer 1: script captures basic echo ---"
-          script -q -e --flush -c 'echo hello-from-pty' /tmp/t1.log
-          echo "L1 bytes=$(wc -c < /tmp/t1.log)"
-          cat /tmp/t1.log
-
-          echo "--- Layer 2: Bun writes to PTY ---"
-          BUN=$(dirname "$OPENCODE_BIN_PATH")/bun
-          echo "Bun binary: $BUN (exists: $(test -f "$BUN" && echo yes || echo no))"
-          if [ -f "$BUN" ]; then
-            script -q -e --flush -c "$BUN -e 'console.log(\"bun-pty-ok\")'" /tmp/t2.log
-            echo "L2 bytes=$(wc -c < /tmp/t2.log)"
-            cat /tmp/t2.log
-          else
-            echo "L2 SKIP: bun not found at $BUN"
-            # Try finding bun elsewhere
-            command -v bun && bun --version || echo "bun not on PATH"
-          fi
-
-          echo "--- Layer 3: opencode --version to PTY ---"
-          timeout 15 script -q -e --flush -c "$OPENCODE_BIN_PATH --version" /tmp/t3.log || true
-          echo "L3 bytes=$(wc -c < /tmp/t3.log)"
-          cat /tmp/t3.log
-
-          echo "--- Layer 4: opencode --version to pipe ---"
-          timeout 15 $OPENCODE_BIN_PATH --version > /tmp/t4.log 2>&1 || true
-          echo "L4 bytes=$(wc -c < /tmp/t4.log)"
-          cat /tmp/t4.log
-
-          echo "--- Layer 5: opencode run to PTY (5s, expect partial) ---"
-          echo "Say hello" > /tmp/smoke-prompt.md
-          timeout --kill-after=5 15 script -q -e --flush -c "OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1 OPENCODE_DISABLE_PROJECT_CONFIG=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1 $OPENCODE_BIN_PATH run \"\$(cat /tmp/smoke-prompt.md)\" < /dev/null" /tmp/t5.log || true
-          echo "L5 bytes=$(wc -c < /tmp/t5.log)"
-          cat /tmp/t5.log
-
-          echo "--- Layer 6: opencode run to pipe (for comparison) ---"
-          timeout --kill-after=5 15 bash -c "OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1 OPENCODE_DISABLE_PROJECT_CONFIG=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1 $OPENCODE_BIN_PATH run \"\$(cat /tmp/smoke-prompt.md)\" < /dev/null" > /tmp/t6.log 2>&1 || true
-          echo "L6 bytes=$(wc -c < /tmp/t6.log)"
-          cat /tmp/t6.log
       - name: Run agent eval
         timeout-minutes: 15
         env:

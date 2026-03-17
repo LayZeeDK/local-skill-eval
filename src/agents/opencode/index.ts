@@ -14,6 +14,60 @@ import * as fs from 'fs';
 const OPENCODE_MODEL = 'qwen3-4b-skill-eval-opencode-agent';
 
 /**
+ * Parse opencode --format json output into a human-readable transcript.
+ * Each line is a JSON event: tool_use, text, step_start, step_finish, error.
+ * Returns a formatted string suitable for LLM grading.
+ */
+function parseJsonEvents(raw: string): string {
+    const lines: string[] = [];
+
+    for (const line of raw.split('\n')) {
+        const trimmed = line.trim();
+
+        if (!trimmed || !trimmed.startsWith('{')) {
+            continue;
+        }
+
+        try {
+            const event = JSON.parse(trimmed);
+
+            if (event.type === 'text' && event.part?.text) {
+                lines.push(`[assistant] ${event.part.text}`);
+            } else if (event.type === 'tool_use' && event.part) {
+                const tool = event.part.tool || 'unknown';
+                const state = event.part.state || {};
+                const input = state.input || {};
+                const status = state.status || '';
+
+                if (tool === 'bash' && input.command) {
+                    lines.push(`[tool] bash: ${input.command}`);
+
+                    if (status === 'completed' && state.output) {
+                        lines.push(`[output] ${state.output}`);
+                    } else if (status === 'error' && state.error) {
+                        lines.push(`[error] ${state.error}`);
+                    }
+                } else if (tool === 'edit' && input.filePath) {
+                    lines.push(`[tool] edit: ${input.filePath}`);
+                } else if (tool === 'write' && input.filePath) {
+                    lines.push(`[tool] write: ${input.filePath}`);
+                } else if (tool === 'read' && input.filePath) {
+                    lines.push(`[tool] read: ${input.filePath}`);
+                } else {
+                    lines.push(`[tool] ${tool}: ${JSON.stringify(input).slice(0, 200)}`);
+                }
+            } else if (event.type === 'error' && event.error) {
+                lines.push(`[error] ${JSON.stringify(event.error)}`);
+            }
+        } catch {
+            // Skip malformed JSON lines
+        }
+    }
+
+    return lines.join('\n');
+}
+
+/**
  * OpenCodeAgent -- wraps the `opencode run` CLI with config injection,
  * git init for project detection, and Ollama model unload.
  *
@@ -123,49 +177,38 @@ export class OpenCodeAgent extends BaseAgent {
             // Convert Windows backslashes to forward slashes — Git Bash
             // interprets backslashes as escape sequences in command strings.
             const opencodeBin = opencodeBinRaw.replace(/\\/g, '/');
-            let fullCmd: string;
-
             // Unset NODE_OPTIONS — V8-specific flags (e.g. --max-old-space-size)
             // leak into Bun (opencode's runtime, JavaScriptCore) and can cause
             // OOM on memory-constrained runners by inflating the parent Node.js
             // heap alongside Ollama's model (~2.5 GB).
             const envVars = 'OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1 OPENCODE_DISABLE_PROJECT_CONFIG=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1';
-            const ocOutFile = '/tmp/.opencode-output.log';
+
+            // opencode's default UI writes to stderr via UI.println →
+            // process.stderr.write().  Docker captures both stdout+stderr
+            // through Tty:true, so default format works there.  But on
+            // local provider (pipe capture), stderr is invisible.
+            // Use --format json on local: routes ALL events through
+            // process.stdout.write(), making output capturable via pipe.
+            const useJsonFormat = !inDocker;
+            const formatFlag = useJsonFormat ? ' --format json' : '';
+            let fullCmd: string;
 
             if (!inDocker && process.platform !== 'win32') {
-                // On Linux (local provider), Bun uses full buffering (~4-8 KB)
-                // when stdout is a pipe.  timeout kills the hung process before
-                // the buffer flushes → 0 bytes.  Fix: use `script --flush` to
-                // allocate a real PTY (forces line buffering).
-                // timeout --kill-after handles orphan processes holding the PTY.
-                // Docker provider already gets a TTY via Tty:true in the API.
-                const opencodeRun = `${envVars} ${opencodeBin} run "$(cat .prompt.md)" < /dev/null`;
-                fullCmd = `unset NODE_OPTIONS; timeout --kill-after=10 300 script -q -e --flush -c '${opencodeRun}' ${ocOutFile}`;
+                // Linux local: timeout --kill-after handles Bun ARM64 hang.
+                fullCmd = `unset NODE_OPTIONS; timeout --kill-after=10 300 ${envVars} ${opencodeBin} run${formatFlag} "$(cat .prompt.md)" < /dev/null`;
             } else {
-                fullCmd = `${envVars} ${opencodeBin} run "$(cat .prompt.md)" < /dev/null`;
+                fullCmd = `${envVars} ${opencodeBin} run${formatFlag} "$(cat .prompt.md)" < /dev/null`;
             }
 
             console.log('[OpenCodeAgent] Running:', fullCmd.slice(0, 250));
             const result = await runCommand(fullCmd);
 
-            // Local+Linux: read output from script's typescript file.
-            // Docker and Windows: use pipe output directly (Docker has Tty:true).
-            let output: string;
-            let exitCode: number;
+            const rawOutput = result.stdout + (result.stderr ? '\n' + result.stderr : '');
+            const output = useJsonFormat ? parseJsonEvents(rawOutput) : rawOutput;
+            const exitCode = result.exitCode;
 
-            if (!inDocker && process.platform !== 'win32') {
-                // Diagnostic: show raw file for debugging PTY capture
-                const rawResult = await runCommand(`wc -c ${ocOutFile} 2>/dev/null; head -5 ${ocOutFile} 2>/dev/null || true`);
-                console.log('[OpenCodeAgent] Raw typescript file:\n' + rawResult.stdout);
-
-                // Read output, stripping script's header/footer lines.
-                const fileResult = await runCommand(`sed '/^Script started/d; /^Script done/d' ${ocOutFile} 2>/dev/null || true`);
-                output = fileResult.stdout;
-                exitCode = result.exitCode;
-                console.log('[OpenCodeAgent] Read output from file:', output.length, 'bytes, pipe stdout:', result.stdout.length, 'bytes');
-            } else {
-                output = result.stdout + (result.stderr ? '\n' + result.stderr : '');
-                exitCode = result.exitCode;
+            if (useJsonFormat) {
+                console.log('[OpenCodeAgent] Raw stdout:', result.stdout.length, 'bytes, stderr:', (result.stderr || '').length, 'bytes, parsed:', output.length, 'bytes');
             }
 
             // exit 124 = timeout sent SIGTERM (expected on ARM64 Linux where

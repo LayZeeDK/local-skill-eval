@@ -125,44 +125,55 @@ export class OpenCodeAgent extends BaseAgent {
             const opencodeBin = opencodeBinRaw.replace(/\\/g, '/');
             let fullCmd: string;
 
+            // Unset NODE_OPTIONS — V8-specific flags (e.g. --max-old-space-size)
+            // leak into Bun (opencode's runtime, JavaScriptCore) and can cause
+            // OOM on memory-constrained runners by inflating the parent Node.js
+            // heap alongside Ollama's model (~2.5 GB).
+            const envVars = 'OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1 OPENCODE_DISABLE_PROJECT_CONFIG=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1';
+            const ocOutFile = '/tmp/.opencode-output.log';
+
             if (process.platform !== 'win32') {
-                // On Linux, wrap opencode in a Docker container with -t (TTY).
-                // Bun uses full buffering (~4-8 KB) when stdout is a pipe.
-                // `timeout` kills the hung process before the buffer flushes → 0 bytes.
-                // Docker -t allocates a real PTY inside the container → Bun uses
-                // line buffering → output is flushed on each newline and captured.
-                // --network host lets the container reach Ollama on localhost:11434.
-                //
-                // PTY approaches without Docker all fail on GitHub Actions:
-                // - `script --flush`: PTY session breaks signal delivery (SIGHUP)
-                // - `unbuffer`: interact needs terminal stdout; -p exits on EOF
-                // - Python pty.openpty+fork: os.waitpid blocks past SIGALRM
-                //   (PEP 475 retries on EINTR), orphans hold slave fd open
-                const dockerEnv = [
-                    '-e OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1',
-                    '-e OPENCODE_DISABLE_PROJECT_CONFIG=1',
-                    '-e OPENCODE_DISABLE_EXTERNAL_SKILLS=1',
-                ].join(' ');
-                // Inner timeout (300s) kills opencode if it hangs (Bun ARM64).
-                // Outer timeout (330s) kills Docker if the container itself hangs.
-                // chown restores host UID:GID on workspace files created by
-                // root inside the container, so local provider cleanup works.
-                const innerCmd = 'npm install -g opencode-ai >/dev/null 2>&1 && timeout --signal=TERM --kill-after=10 300 opencode run \\"$(cat .prompt.md)\\" < /dev/null; chown -R $(stat -c %u:%g .) . 2>/dev/null';
-                fullCmd = `unset NODE_OPTIONS; timeout --signal=TERM --kill-after=10 330 docker run --rm -t --network host -v "$(pwd):/workspace" -w /workspace ${dockerEnv} node:24 bash -c '${innerCmd}'`;
+                // On Linux, Bun uses full buffering (~4-8 KB) when stdout is a
+                // pipe.  timeout kills the hung process before the buffer flushes
+                // → 0 bytes.  Fix: compile a small C PTY relay that gives
+                // opencode a real PTY (forces line buffering) and relays output
+                // to stdout.  Unlike previous PTY approaches:
+                // - script --flush: PTY session breaks GHA signal delivery
+                // - unbuffer: interact needs terminal stdout; -p exits on EOF
+                // - Python pty: PEP 475 auto-retries waitpid on EINTR
+                // The C relay avoids all these: EINTR is not retried in C,
+                // SIGALRM hard deadline prevents hangs, WNOHANG avoids blocking.
+                const ptyRelaySrc = path.join(__dirname, 'pty-relay.c').replace(/\\/g, '/');
+                await runCommand(`gcc -O2 -o /tmp/pty-relay ${ptyRelaySrc} -lutil`);
+                // Wrap in bash -c because pty-relay uses execvp (can't
+                // handle shell constructs like $() or <).  The inner
+                // < /dev/null is critical — it redirects opencode's stdin
+                // to /dev/null INSIDE the PTY so Bun.stdin.text() gets
+                // EOF instead of blocking on the PTY slave fd.
+                const opencodeRun = `${envVars} ${opencodeBin} run "$(cat .prompt.md)" < /dev/null`;
+                fullCmd = `unset NODE_OPTIONS; /tmp/pty-relay 300 bash -c '${opencodeRun}' > ${ocOutFile} 2>&1`;
             } else {
-                const envVars = 'OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1 OPENCODE_DISABLE_PROJECT_CONFIG=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1';
                 fullCmd = `${envVars} ${opencodeBin} run "$(cat .prompt.md)" < /dev/null`;
             }
 
             console.log('[OpenCodeAgent] Running:', fullCmd.slice(0, 250));
             const result = await runCommand(fullCmd);
 
-            // Docker -t merges stderr into stdout through the PTY.
-            // On Windows, collect both stdout and stderr.
-            const output = process.platform !== 'win32'
-                ? result.stdout
-                : result.stdout + (result.stderr ? '\n' + result.stderr : '');
-            const exitCode = result.exitCode;
+            // On Linux, read output from file (PTY relay writes to stdout,
+            // which is redirected to the file).
+            // On Windows, use pipe output directly.
+            let output: string;
+            let exitCode: number;
+
+            if (process.platform !== 'win32') {
+                const fileResult = await runCommand(`cat ${ocOutFile} 2>/dev/null || true`);
+                output = fileResult.stdout;
+                exitCode = result.exitCode;
+                console.log('[OpenCodeAgent] Read output from file:', output.length, 'bytes');
+            } else {
+                output = result.stdout + (result.stderr ? '\n' + result.stderr : '');
+                exitCode = result.exitCode;
+            }
 
             // exit 124 = timeout sent SIGTERM (expected on ARM64 Linux where
             // Bun hangs after completing work).  The agent output is still valid.

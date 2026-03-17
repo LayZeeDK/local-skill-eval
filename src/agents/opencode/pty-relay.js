@@ -13,7 +13,17 @@
  */
 'use strict';
 
+const fs = require('fs');
 const pty = require('node-pty');
+
+// Diagnostic log — separate file so it doesn't pollute captured output
+const DIAG = '/tmp/.pty-relay-diag.log';
+function diag(msg) {
+    fs.appendFileSync(DIAG, `[${new Date().toISOString()}] ${msg}\n`);
+}
+
+diag(`started pid=${process.pid} argv=${JSON.stringify(process.argv.slice(2))}`);
+diag(`stdout fd=${process.stdout.fd} isTTY=${process.stdout.isTTY}`);
 
 const args = process.argv.slice(2);
 
@@ -26,13 +36,27 @@ const timeoutSec = parseInt(args[0], 10);
 const cmd = args[1];
 const cmdArgs = args.slice(2);
 
+diag(`spawning: ${cmd} ${cmdArgs.join(' ')}`);
+
 const proc = pty.spawn(cmd, cmdArgs, {
     cols: 200,
     rows: 50,
     env: process.env,
 });
 
-proc.onData(data => process.stdout.write(data));
+diag(`child pid=${proc.pid}`);
+
+let totalBytes = 0;
+
+proc.onData(data => {
+    totalBytes += data.length;
+
+    if (totalBytes <= data.length) {
+        diag(`first onData: ${data.length} bytes`);
+    }
+
+    process.stdout.write(data);
+});
 
 let done = false;
 
@@ -42,6 +66,7 @@ function cleanup(code) {
     }
 
     done = true;
+    diag(`cleanup code=${code} totalBytes=${totalBytes}`);
 
     // Kill the entire process group (child session) to clean up
     // orphan processes (Ollama background workers, etc.)
@@ -55,13 +80,17 @@ function cleanup(code) {
 }
 
 // On child exit, wait briefly for remaining data events, then exit
-proc.onExit(({ exitCode }) => {
+proc.onExit(({ exitCode, signal }) => {
+    diag(`onExit exitCode=${exitCode} signal=${signal} totalBytes=${totalBytes}`);
     clearTimeout(timer);
     setTimeout(() => cleanup(exitCode), 300);
 });
 
 // Hard deadline: timeout + 10s grace
-const timer = setTimeout(() => cleanup(124), (timeoutSec + 10) * 1000);
+const timer = setTimeout(() => {
+    diag(`timeout fired after ${timeoutSec + 10}s, totalBytes=${totalBytes}`);
+    cleanup(124);
+}, (timeoutSec + 10) * 1000);
 
 // Forward signals from parent (GHA step cancellation)
 process.on('SIGTERM', () => cleanup(143));

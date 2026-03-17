@@ -168,6 +168,12 @@ export class OpenCodeAgent extends BaseAgent {
                 output = fileResult.stdout;
                 exitCode = result.exitCode;
                 console.log('[OpenCodeAgent] Read output from file:', output.length, 'bytes');
+                // Diagnostic log from pty-relay (temporary, for debugging)
+                const diagResult = await runCommand('cat /tmp/.pty-relay-diag.log 2>/dev/null || true');
+
+                if (diagResult.stdout.trim()) {
+                    console.log('[OpenCodeAgent] PTY relay diagnostics:\n' + diagResult.stdout);
+                }
             } else {
                 output = result.stdout + (result.stderr ? '\n' + result.stderr : '');
                 exitCode = result.exitCode;

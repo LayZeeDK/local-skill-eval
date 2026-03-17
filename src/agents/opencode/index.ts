@@ -145,9 +145,14 @@ export class OpenCodeAgent extends BaseAgent {
             // Linux local: wrap with timeout for process-level kill; unset
             // NODE_OPTIONS so V8 flags do not reach Bun/JavaScriptCore.
             const isLinuxLocal = !inDocker && process.platform !== 'win32';
+            // Inner command: shell interprets VAR=value prefix and expands $(cat ...)
+            const innerCmd = `${envVars} ${opencodeBin} run "$(cat .prompt.md)" < /dev/null`;
+            // Linux local: timeout exec's its COMMAND directly (no shell) so
+            // VAR=value prefix is not interpreted.  Wrap in bash -c so the
+            // env vars and shell redirects are handled by the inner shell.
             const fullCmd = isLinuxLocal
-                ? `unset NODE_OPTIONS; timeout --kill-after=10 240 ${envVars} ${opencodeBin} run "$(cat .prompt.md)" < /dev/null`
-                : `${envVars} ${opencodeBin} run "$(cat .prompt.md)" < /dev/null`;
+                ? `unset NODE_OPTIONS; timeout --kill-after=10 240 bash -c '${innerCmd}'`
+                : innerCmd;
 
             console.log('[OpenCodeAgent] Running:', fullCmd.slice(0, 250));
             const result = await runCommand(fullCmd);

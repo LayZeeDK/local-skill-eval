@@ -135,23 +135,21 @@ export class OpenCodeAgent extends BaseAgent {
             if (process.platform !== 'win32') {
                 // On Linux, Bun uses full buffering (~4-8 KB) when stdout is a
                 // pipe.  timeout kills the hung process before the buffer flushes
-                // → 0 bytes.  Fix: compile a small C PTY relay that gives
-                // opencode a real PTY (forces line buffering) and relays output
-                // to stdout.  Unlike previous PTY approaches:
+                // → 0 bytes.  Fix: use node-pty to give opencode a real PTY
+                // (forces line buffering) and relay output to stdout.
+                // Unlike previous PTY approaches:
                 // - script --flush: PTY session breaks GHA signal delivery
                 // - unbuffer: interact needs terminal stdout; -p exits on EOF
                 // - Python pty: PEP 475 auto-retries waitpid on EINTR
-                // The C relay avoids all these: EINTR is not retried in C,
-                // SIGALRM hard deadline prevents hangs, WNOHANG avoids blocking.
-                const ptyRelaySrc = path.join(__dirname, 'pty-relay.c').replace(/\\/g, '/');
-                await runCommand(`gcc -O2 -o /tmp/pty-relay ${ptyRelaySrc} -lutil`);
-                // Wrap in bash -c because pty-relay uses execvp (can't
+                // node-pty uses poll()-based I/O internally, avoiding all three.
+                const ptyRelay = path.join(__dirname, 'pty-relay.js').replace(/\\/g, '/');
+                // Wrap in bash -c because the relay uses pty.spawn (can't
                 // handle shell constructs like $() or <).  The inner
                 // < /dev/null is critical — it redirects opencode's stdin
                 // to /dev/null INSIDE the PTY so Bun.stdin.text() gets
                 // EOF instead of blocking on the PTY slave fd.
                 const opencodeRun = `${envVars} ${opencodeBin} run "$(cat .prompt.md)" < /dev/null`;
-                fullCmd = `unset NODE_OPTIONS; /tmp/pty-relay 300 bash -c '${opencodeRun}' > ${ocOutFile} 2>&1`;
+                fullCmd = `unset NODE_OPTIONS; node ${ptyRelay} 300 bash -c '${opencodeRun}' > ${ocOutFile} 2>&1`;
             } else {
                 fullCmd = `${envVars} ${opencodeBin} run "$(cat .prompt.md)" < /dev/null`;
             }

@@ -49,6 +49,7 @@
   "dependencies": {
     "dockerode": "^4.0.9",
     "fs-extra": "^11.3.3",
+    "node-pty": "^1.1.0",
     "ollama": "^0.6.3",
     "picomatch": "^4.0.3",
     "tar-stream": "^3.1.7",

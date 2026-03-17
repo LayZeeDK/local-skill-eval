@@ -195,7 +195,8 @@ export class OpenCodeAgent extends BaseAgent {
 
             if (!inDocker && process.platform !== 'win32') {
                 // Linux local: timeout --kill-after handles Bun ARM64 hang.
-                fullCmd = `unset NODE_OPTIONS; timeout --kill-after=10 300 ${envVars} ${opencodeBin} run${formatFlag} "$(cat .prompt.md)" < /dev/null`;
+                // env vars must come BEFORE timeout, not between timeout and binary.
+                fullCmd = `unset NODE_OPTIONS; ${envVars} timeout --kill-after=10 300 ${opencodeBin} run${formatFlag} "$(cat .prompt.md)" < /dev/null`;
             } else {
                 fullCmd = `${envVars} ${opencodeBin} run${formatFlag} "$(cat .prompt.md)" < /dev/null`;
             }

@@ -132,7 +132,7 @@ export class OpenCodeAgent extends BaseAgent {
             // leak into Bun (opencode's runtime, JavaScriptCore) and can cause
             // OOM on memory-constrained runners by inflating the parent Node.js
             // heap alongside Ollama's model (~2.5 GB).
-            const envVars = 'OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1 OPENCODE_DISABLE_PROJECT_CONFIG=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1';
+            const envVars = 'OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1';
 
             // On Linux local provider, two issues interact:
             //   1. Bun.stdin.text() at run.ts:345 hangs when stdin is a pipe

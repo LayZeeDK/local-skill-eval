@@ -150,62 +150,19 @@ export class OpenCodeAgent extends BaseAgent {
 
             if (process.platform !== 'win32') {
                 const opencodeRun = `${opencodeBin} run "$(cat /tmp/.prompt.md)" < /dev/null`;
-                // Use a Python PTY wrapper to force line-buffered output.
-                // Without it, libc uses full buffering (~4-8 KB) when stdout
-                // is a file/pipe.  If timeout kills the process before the
-                // buffer fills, output is lost (0 bytes).
+                // Redirect output to file.  On ARM64 Linux, Bun uses full
+                // buffering (~4-8 KB) and hangs after completing work.
+                // timeout kills it, but unflushed buffer data is lost (0 bytes).
+                // The deterministic grader still works (checks file changes),
+                // but the LLM grader gets no transcript to evaluate.
                 //
-                // The wrapper forks, connects child stdout/stderr to a PTY
-                // slave (triggering kernel-level line buffering), and reads
-                // from the PTY master with per-read file flushing.
-                //
-                // Why not `script`?  Creates a PTY *session* that interferes
-                // with GitHub Actions' signal delivery (SIGHUP instead of
-                // SIGINT), causing step cancellation to hang.
-                // Why not `unbuffer`?  Without `-p`, Expect's `interact`
-                // requires stdout to be a terminal.  With `-p`, exits on
-                // stdin EOF from /dev/null.
-                const timeoutCmd = `timeout --signal=TERM --kill-after=10 300 ${opencodeRun}`;
-                const ocExitFile = '/tmp/.opencode-exit';
-                // Write wrapper to a file to avoid nested quoting nightmares.
-                // The wrapper allocates a PTY pair (no session), forks, and
-                // reads from the PTY master with per-read file flushing.
-                const ptyScript = `/tmp/.pty-wrapper.py`;
-                const bashCmd = `${envVars} ${timeoutCmd}`;
-                await runCommand(`cat > ${ptyScript} << 'PYEOF'
-import pty, os, sys, signal, threading
-# Hard deadline: kill this process if anything hangs.
-signal.alarm(320)
-m, s = pty.openpty()
-pid = os.fork()
-if pid == 0:
-    os.close(m)
-    os.dup2(s, 1)
-    os.dup2(s, 2)
-    os.close(s)
-    os.execvp("bash", ["bash", "-c", """${bashCmd}"""])
-else:
-    os.close(s)
-    f = open("${ocOutFile}", "wb")
-    def reader():
-        while True:
-            try:
-                d = os.read(m, 4096)
-                if not d: break
-                f.write(d)
-                f.flush()
-            except OSError: break
-    t = threading.Thread(target=reader, daemon=True)
-    t.start()
-    _, st = os.waitpid(pid, 0)
-    ec = os.waitstatus_to_exitcode(st)
-    os.close(m)
-    t.join(timeout=2)
-    f.close()
-    open("${ocExitFile}", "w").write(str(ec))
-    sys.exit(ec)
-PYEOF`);
-                fullCmd = `unset NODE_OPTIONS; python3 ${ptyScript}`;
+                // PTY approaches all fail on GitHub Actions:
+                // - `script --flush`: PTY session breaks signal delivery (SIGHUP)
+                // - `unbuffer`: interact needs terminal stdout; -p exits on EOF
+                // - Python pty.openpty+fork: os.waitpid blocks past SIGALRM
+                //   (PEP 475 retries on EINTR), orphans hold slave fd open
+                // 300s timeout accommodates ARM64 CI Ollama inference speed.
+                fullCmd = `unset NODE_OPTIONS; ${envVars} timeout --signal=TERM --kill-after=10 300 ${opencodeRun} > ${ocOutFile} 2>&1`;
             } else {
                 fullCmd = `${envVars} ${opencodeBin} run "$(cat /tmp/.prompt.md)" < /dev/null`;
             }
@@ -213,24 +170,17 @@ PYEOF`);
             console.log('[OpenCodeAgent] Running:', fullCmd.slice(0, 250));
             const result = await runCommand(fullCmd);
 
-            // On Linux, read output + exit code from files written by the
-            // Python PTY wrapper.  Strip PTY carriage returns.
+            // On Linux, read output from file.  Exit code comes from
+            // the process (timeout returns 124 on SIGTERM kill).
             // On Windows, use pipe output + process exit code.
             let output: string;
             let exitCode: number;
 
             if (process.platform !== 'win32') {
-                // Diagnostics: check file state before reading
-                const diagResult = await runCommand(`ls -la ${ocOutFile} /tmp/.opencode-exit 2>&1; echo "---"; wc -c ${ocOutFile} 2>&1; echo "---"; head -c 500 ${ocOutFile} 2>&1 | cat -v`);
-                console.log('[OpenCodeAgent] File diagnostics:', diagResult.stdout.trim());
-
                 const fileResult = await runCommand(`cat ${ocOutFile} 2>/dev/null || true`);
-                output = fileResult.stdout.replace(/\r/g, '');
-
-                const exitResult = await runCommand(`cat /tmp/.opencode-exit 2>/dev/null || echo 1`);
-                exitCode = parseInt(exitResult.stdout.trim(), 10) || 1;
-
-                console.log('[OpenCodeAgent] Read output from file:', output.length, 'bytes, exit code:', exitCode);
+                output = fileResult.stdout;
+                exitCode = result.exitCode;
+                console.log('[OpenCodeAgent] Read output from file:', output.length, 'bytes');
             } else {
                 output = result.stdout + (result.stderr ? '\n' + result.stderr : '');
                 exitCode = result.exitCode;

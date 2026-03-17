@@ -119,6 +119,15 @@ export class OpenCodeAgent extends BaseAgent {
             // Convert Windows backslashes to forward slashes — Git Bash
             // interprets backslashes as escape sequences in command strings.
             const opencodeBin = opencodeBinRaw.replace(/\\/g, '/');
+
+            // Pre-flight: verify config injection and binary reachability before
+            // entering the script PTY wrapper, where diagnosis is harder.
+            const configCheck = await runCommand('cat opencode.json 2>/dev/null | head -5 || echo "[WARN] opencode.json missing"');
+            console.log('[OpenCodeAgent] opencode.json (head):', configCheck.stdout.slice(0, 300).trim());
+
+            const versionCheck = await runCommand(`timeout 10 ${opencodeBin} --version 2>&1 || echo "[WARN] --version failed/timed-out"`);
+            console.log('[OpenCodeAgent] --version:', versionCheck.stdout.slice(0, 100).trim());
+
             // Unset NODE_OPTIONS — V8-specific flags (e.g. --max-old-space-size)
             // leak into Bun (opencode's runtime, JavaScriptCore) and can cause
             // OOM on memory-constrained runners by inflating the parent Node.js

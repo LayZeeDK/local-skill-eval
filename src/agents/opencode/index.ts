@@ -146,7 +146,8 @@ export class OpenCodeAgent extends BaseAgent {
             // NODE_OPTIONS so V8 flags do not reach Bun/JavaScriptCore.
             const isLinuxLocal = !inDocker && process.platform !== 'win32';
             // Inner command: shell interprets VAR=value prefix and expands $(cat ...)
-            const innerCmd = `${envVars} ${opencodeBin} run "$(cat .prompt.md)" < /dev/null`;
+            // --print-logs sends opencode's internal log stream to stderr for CI diagnosis.
+            const innerCmd = `${envVars} ${opencodeBin} run --print-logs "$(cat .prompt.md)" < /dev/null`;
             // Linux local: timeout exec's its COMMAND directly (no shell) so
             // VAR=value prefix is not interpreted.  Wrap in bash -c so the
             // env vars and shell redirects are handled by the inner shell.
@@ -168,8 +169,10 @@ export class OpenCodeAgent extends BaseAgent {
                 'output:', output.length, 'bytes',
             );
 
-            if (exitCode !== 0 && !killedByTimeout) {
-                console.error('[OpenCodeAgent] output (tail):', output.slice(-500));
+            if (exitCode !== 0) {
+                // Log tail in all failure cases including timeout -- helps diagnose
+                // what opencode was doing during the 240s window.
+                console.error('[OpenCodeAgent] output (tail):', output.slice(-1000));
             }
 
             return output;

@@ -1,4 +1,3 @@
-import { Ollama } from 'ollama';
 import { BaseAgent, CommandResult } from '../../types';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -25,13 +24,9 @@ const OPENCODE_MODEL = 'qwen3-4b-skill-eval-opencode-agent';
  *
  * Timeout protection is provided by the evalRunner's withTimeout wrapper.
  */
-export class OpenCodeAgent extends BaseAgent {
-    private ollamaClient: Ollama;
+const OLLAMA_HOST = 'http://127.0.0.1:11434';
 
-    constructor() {
-        super();
-        this.ollamaClient = new Ollama({ host: 'http://127.0.0.1:11434' });
-    }
+export class OpenCodeAgent extends BaseAgent {
 
     async run(
         instruction: string,
@@ -194,38 +189,36 @@ export class OpenCodeAgent extends BaseAgent {
             // 6. Unload model and wait for eviction so the LLM grader
             //    (qwen2.5:3b) can load without memory contention.
             //    keep_alive: 0 is async -- the model may still be resident
-            //    when the call returns. Poll ollama ps to confirm eviction.
-            //    Wrap in a 30s hard timeout -- if Ollama is unreachable, the
-            //    HTTP calls hang forever, keeping Node.js alive and blocking
-            //    CI job cleanup.
+            //    when the call returns. Poll /api/ps to confirm eviction.
+            //    Use fetch() with AbortSignal.timeout() on every call --
+            //    the Ollama SDK does not propagate AbortSignal for non-
+            //    streaming requests, leaving the underlying TCP connection
+            //    open until undici's default 300s headersTimeout fires and
+            //    keeping Node.js alive long after we intended to exit.
             try {
-                await Promise.race([
-                    (async () => {
-                        await this.ollamaClient.chat({
-                            model: OPENCODE_MODEL,
-                            messages: [],
-                            keep_alive: 0,
-                        });
+                await fetch(`${OLLAMA_HOST}/api/chat`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ model: OPENCODE_MODEL, messages: [], keep_alive: 0, stream: false }),
+                    signal: AbortSignal.timeout(10_000),
+                });
 
-                        const maxWaitMs = 15_000;
-                        const pollMs = 500;
-                        const deadline = Date.now() + maxWaitMs;
+                const maxWaitMs = 15_000;
+                const pollMs = 500;
+                const deadline = Date.now() + maxWaitMs;
 
-                        while (Date.now() < deadline) {
-                            const ps = await this.ollamaClient.ps();
-                            const still = ps.models.some(m => m.name.startsWith(OPENCODE_MODEL));
+                while (Date.now() < deadline) {
+                    const ps = await fetch(`${OLLAMA_HOST}/api/ps`, {
+                        signal: AbortSignal.timeout(5_000),
+                    }).then(r => r.json() as Promise<{ models: Array<{ name: string }> }>);
+                    const still = ps.models.some(m => m.name.startsWith(OPENCODE_MODEL));
 
-                            if (!still) {
-                                break;
-                            }
+                    if (!still) {
+                        break;
+                    }
 
-                            await new Promise(r => setTimeout(r, pollMs));
-                        }
-                    })(),
-                    new Promise((_, reject) =>
-                        setTimeout(() => reject(new Error('Model unload timed out')), 30_000)
-                    ),
-                ]);
+                    await new Promise(r => setTimeout(r, pollMs));
+                }
             } catch {
                 // Ignore unload errors -- model may already be unloaded
             }

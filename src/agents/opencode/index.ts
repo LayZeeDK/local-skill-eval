@@ -183,33 +183,45 @@ export class OpenCodeAgent extends BaseAgent {
             // heap alongside Ollama's model (~2.5 GB).
             const envVars = 'OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1 OPENCODE_DISABLE_PROJECT_CONFIG=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1';
 
-            // opencode's default UI writes to stderr via UI.println →
-            // process.stderr.write().  Docker captures both stdout+stderr
-            // through Tty:true, so default format works there.  But on
-            // local provider (pipe capture), stderr is invisible.
-            // Use --format json on local: routes ALL events through
-            // process.stdout.write(), making output capturable via pipe.
-            const useJsonFormat = !inDocker;
-            const formatFlag = useJsonFormat ? ' --format json' : '';
+            // On Linux local provider, two issues interact:
+            //   1. Bun.stdin.text() at run.ts:345 hangs when stdin is a pipe
+            //      or /dev/null (not a TTY).  opencode hangs before producing
+            //      any output.
+            //   2. UI.println() writes to stderr, invisible to pipe capture.
+            //
+            // Fix: script --flush gives opencode a PTY as stdin (isTTY=true),
+            // so Bun.stdin.text() is skipped.  --format json routes all events
+            // to process.stdout.write(), captured in the typescript file.
+            // DO NOT use < /dev/null inside the script -c command — that
+            // overrides the PTY stdin, making isTTY=false again.
+            //
+            // Docker provider: Tty:true already provides a PTY stdin (no hang)
+            // and captures stdout+stderr in one stream (default format works).
+            // Windows: no ARM64 Bun hang, pipe capture works fine.
+            const useScriptPty = !inDocker && process.platform !== 'win32';
+            const ocOutFile = '/tmp/.opencode-output.log';
             let fullCmd: string;
 
-            if (!inDocker && process.platform !== 'win32') {
-                // Linux local: timeout --kill-after handles Bun ARM64 hang.
-                // env vars must come BEFORE timeout, not between timeout and binary.
-                fullCmd = `unset NODE_OPTIONS; ${envVars} timeout --kill-after=10 300 ${opencodeBin} run${formatFlag} "$(cat .prompt.md)" < /dev/null`;
+            if (useScriptPty) {
+                const opencodeRun = `${envVars} ${opencodeBin} run --format json "$(cat .prompt.md)"`;
+                fullCmd = `unset NODE_OPTIONS; timeout --kill-after=10 300 script -q -e --flush -c '${opencodeRun}' ${ocOutFile}`;
             } else {
-                fullCmd = `${envVars} ${opencodeBin} run${formatFlag} "$(cat .prompt.md)" < /dev/null`;
+                fullCmd = `${envVars} ${opencodeBin} run "$(cat .prompt.md)" < /dev/null`;
             }
 
             console.log('[OpenCodeAgent] Running:', fullCmd.slice(0, 250));
             const result = await runCommand(fullCmd);
 
-            const rawOutput = result.stdout + (result.stderr ? '\n' + result.stderr : '');
-            const output = useJsonFormat ? parseJsonEvents(rawOutput) : rawOutput;
+            let output: string;
             const exitCode = result.exitCode;
 
-            if (useJsonFormat) {
-                console.log('[OpenCodeAgent] Raw stdout:', result.stdout.length, 'bytes, stderr:', (result.stderr || '').length, 'bytes, parsed:', output.length, 'bytes');
+            if (useScriptPty) {
+                const fileResult = await runCommand(`cat ${ocOutFile} 2>/dev/null || true`);
+                const rawFile = fileResult.stdout;
+                output = parseJsonEvents(rawFile);
+                console.log('[OpenCodeAgent] File:', rawFile.length, 'bytes raw, parsed:', output.length, 'bytes');
+            } else {
+                output = result.stdout + (result.stderr ? '\n' + result.stderr : '');
             }
 
             // exit 124 = timeout sent SIGTERM (expected on ARM64 Linux where

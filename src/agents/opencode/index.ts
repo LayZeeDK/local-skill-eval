@@ -150,24 +150,54 @@ export class OpenCodeAgent extends BaseAgent {
 
             if (process.platform !== 'win32') {
                 const opencodeRun = `${opencodeBin} run "$(cat /tmp/.prompt.md)" < /dev/null`;
-                // Use `script --flush` to force line-buffered output via PTY.
+                // Use a Python PTY wrapper to force line-buffered output.
                 // Without it, libc uses full buffering (~4-8 KB) when stdout
                 // is a file/pipe.  If timeout kills the process before the
                 // buffer fills, output is lost (0 bytes).
                 //
-                // `script` allocates a PTY session that forces kernel-level
-                // line buffering.  `--flush` flushes to the log file after
-                // each write.  `-e` preserves the child's exit code.
-                // An outer timeout prevents hangs if orphan processes hold
-                // the PTY session open (e.g. Ollama background processes).
+                // The wrapper forks, connects child stdout/stderr to a PTY
+                // slave (triggering kernel-level line buffering), and reads
+                // from the PTY master with per-read file flushing.
                 //
+                // Why not `script`?  Creates a PTY *session* that interferes
+                // with GitHub Actions' signal delivery (SIGHUP instead of
+                // SIGINT), causing step cancellation to hang.
                 // Why not `unbuffer`?  Without `-p`, Expect's `interact`
-                // requires stdout to be a terminal — fails silently with
-                // file redirect.  With `-p`, it exits on stdin EOF.
-                const timeoutCmd = `${envVars} timeout --signal=TERM --kill-after=10 300 ${opencodeRun}`;
-                const scriptCmd = `script --flush -qec '${timeoutCmd}' ${ocOutFile}`;
-                // Outer timeout = inner (300s) + kill-after (10s) + margin (10s)
-                fullCmd = `unset NODE_OPTIONS; timeout --signal=TERM --kill-after=10 320 ${scriptCmd} 2>/dev/null`;
+                // requires stdout to be a terminal.  With `-p`, exits on
+                // stdin EOF from /dev/null.
+                const timeoutCmd = `timeout --signal=TERM --kill-after=10 300 ${opencodeRun}`;
+                const ocExitFile = '/tmp/.opencode-exit';
+                // Write wrapper to a file to avoid nested quoting nightmares.
+                // The wrapper allocates a PTY pair (no session), forks, and
+                // reads from the PTY master with per-read file flushing.
+                const ptyScript = `/tmp/.pty-wrapper.py`;
+                const bashCmd = `${envVars} ${timeoutCmd}`;
+                await runCommand(`cat > ${ptyScript} << 'PYEOF'
+import pty, os, sys
+m, s = pty.openpty()
+pid = os.fork()
+if pid == 0:
+    os.close(m)
+    os.dup2(s, 1)
+    os.dup2(s, 2)
+    os.close(s)
+    os.execvp("bash", ["bash", "-c", """${bashCmd}"""])
+else:
+    os.close(s)
+    with open("${ocOutFile}", "wb") as f:
+        while True:
+            try:
+                d = os.read(m, 4096)
+                if not d: break
+                f.write(d)
+                f.flush()
+            except OSError: break
+    _, st = os.waitpid(pid, 0)
+    ec = os.waitstatus_to_exitcode(st)
+    open("${ocExitFile}", "w").write(str(ec))
+    sys.exit(ec)
+PYEOF`);
+                fullCmd = `unset NODE_OPTIONS; python3 ${ptyScript}`;
             } else {
                 fullCmd = `${envVars} ${opencodeBin} run "$(cat /tmp/.prompt.md)" < /dev/null`;
             }
@@ -175,34 +205,24 @@ export class OpenCodeAgent extends BaseAgent {
             console.log('[OpenCodeAgent] Running:', fullCmd.slice(0, 250));
             const result = await runCommand(fullCmd);
 
-            // On Linux, read output from script's log file.  Strip the
-            // "Script started/done" header/footer and PTY carriage returns.
-            // Extract exit code from the "COMMAND_EXIT_CODE" footer line.
+            // On Linux, read output + exit code from files written by the
+            // Python PTY wrapper.  Strip PTY carriage returns.
             // On Windows, use pipe output + process exit code.
             let output: string;
             let exitCode: number;
 
             if (process.platform !== 'win32') {
                 // Diagnostics: check file state before reading
-                const diagResult = await runCommand(`ls -la ${ocOutFile} 2>&1; echo "---"; wc -c ${ocOutFile} 2>&1; echo "---"; head -c 500 ${ocOutFile} 2>&1 | cat -v`);
+                const diagResult = await runCommand(`ls -la ${ocOutFile} /tmp/.opencode-exit 2>&1; echo "---"; wc -c ${ocOutFile} 2>&1; echo "---"; head -c 500 ${ocOutFile} 2>&1 | cat -v`);
                 console.log('[OpenCodeAgent] File diagnostics:', diagResult.stdout.trim());
 
                 const fileResult = await runCommand(`cat ${ocOutFile} 2>/dev/null || true`);
-                let raw = fileResult.stdout;
+                output = fileResult.stdout.replace(/\r/g, '');
 
-                // Extract exit code from script's footer:
-                // Script done on ... [COMMAND_EXIT_CODE="124"]
-                const exitMatch = raw.match(/COMMAND_EXIT_CODE="(\d+)"/);
-                exitCode = exitMatch ? parseInt(exitMatch[1], 10) : result.exitCode;
+                const exitResult = await runCommand(`cat /tmp/.opencode-exit 2>/dev/null || echo 1`);
+                exitCode = parseInt(exitResult.stdout.trim(), 10) || 1;
 
-                // Strip script header/footer lines and PTY carriage returns
-                raw = raw
-                    .replace(/^Script started on [^\n]*\n/, '')
-                    .replace(/\nScript done on [^\n]*\n?$/, '')
-                    .replace(/\r/g, '');
-                output = raw;
-
-                console.log('[OpenCodeAgent] Raw file:', raw.length, 'bytes -> stripped:', output.length, 'bytes, exit code:', exitCode);
+                console.log('[OpenCodeAgent] Read output from file:', output.length, 'bytes, exit code:', exitCode);
             } else {
                 output = result.stdout + (result.stderr ? '\n' + result.stderr : '');
                 exitCode = result.exitCode;

@@ -68,10 +68,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node
-      - name: Tune kernel for large-RSS processes
-        run: |
-          sudo sysctl -w vm.overcommit_memory=1
-          sudo sysctl -w vm.max_map_count=262144
       - uses: ./.github/actions/setup-ollama
         with:
           models: |
@@ -139,10 +135,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node
-      - name: Tune kernel for large-RSS processes
-        run: |
-          sudo sysctl -w vm.overcommit_memory=1
-          sudo sysctl -w vm.max_map_count=262144
       - uses: ./.github/actions/setup-ollama
         with:
           models: |
@@ -193,10 +185,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node
-      - name: Tune kernel for large-RSS processes
-        run: |
-          sudo sysctl -w vm.overcommit_memory=1
-          sudo sysctl -w vm.max_map_count=262144
       - uses: ./.github/actions/setup-ollama
         with:
           models: |
@@ -226,10 +214,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node
-      - name: Tune kernel for large-RSS processes
-        run: |
-          sudo sysctl -w vm.overcommit_memory=1
-          sudo sysctl -w vm.max_map_count=262144
       - uses: ./.github/actions/setup-ollama
         with:
           models: |

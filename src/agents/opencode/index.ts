@@ -134,53 +134,27 @@ export class OpenCodeAgent extends BaseAgent {
             // heap alongside Ollama's model (~2.5 GB).
             const envVars = 'OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1';
 
-            // On Linux local provider, two issues interact:
-            //   1. Bun.stdin.text() at run.ts:345 hangs when stdin is a pipe
-            //      or /dev/null (not a TTY).  opencode hangs before producing
-            //      any output.
-            //   2. UI.println() writes to stderr, invisible to pipe capture.
+            // All platforms: run opencode with stdin redirected to /dev/null.
+            // Bun.stdin.text() (run.ts:345) only hangs when stdin is a never-
+            // closing pipe — /dev/null gives immediate EOF and returns "".
+            // The script --flush PTY approach was unreliable: script's file
+            // capture lost data under SIGTERM and added timing complexity.
+            // Docker provider uses the same < /dev/null pattern (Tty:true
+            // exec makes stdout a TTY, but stdin isTTY check is what matters).
             //
-            // Fix: script --flush gives opencode a PTY as stdin (isTTY=true),
-            // so Bun.stdin.text() is skipped.  --format json routes all events
-            // to process.stdout.write(), captured in the typescript file.
-            // DO NOT use < /dev/null inside the script -c command — that
-            // overrides the PTY stdin, making isTTY=false again.
-            //
-            // Docker provider: Tty:true already provides a PTY stdin (no hang)
-            // and captures stdout+stderr in one stream (default format works).
-            // Windows: no ARM64 Bun hang, pipe capture works fine.
-            const useScriptPty = !inDocker && process.platform !== 'win32';
-            const ocOutFile = '/tmp/.opencode-output.log';
-            let fullCmd: string;
-
-            if (useScriptPty) {
-                // After opencode exits, kill 0 sends SIGTERM to the entire
-                // PTY process group (including orphan Ollama workers holding
-                // the PTY slave fd open).  Without this, script waits for
-                // EOF on the PTY master indefinitely and timeout has to fire.
-                const opencodeRun = `${envVars} ${opencodeBin} run "$(cat .prompt.md)"; kill 0 2>/dev/null`;
-                fullCmd = `unset NODE_OPTIONS; timeout --kill-after=10 240 script -q -e --flush -c '${opencodeRun}' ${ocOutFile}`;
-            } else {
-                fullCmd = `${envVars} ${opencodeBin} run "$(cat .prompt.md)" < /dev/null`;
-            }
+            // Linux local: wrap with timeout for process-level kill; unset
+            // NODE_OPTIONS so V8 flags do not reach Bun/JavaScriptCore.
+            const isLinuxLocal = !inDocker && process.platform !== 'win32';
+            const fullCmd = isLinuxLocal
+                ? `unset NODE_OPTIONS; timeout --kill-after=10 240 ${envVars} ${opencodeBin} run "$(cat .prompt.md)" < /dev/null`
+                : `${envVars} ${opencodeBin} run "$(cat .prompt.md)" < /dev/null`;
 
             console.log('[OpenCodeAgent] Running:', fullCmd.slice(0, 250));
             const result = await runCommand(fullCmd);
 
-            let output: string;
             const exitCode = result.exitCode;
-
-            if (useScriptPty) {
-                const fileResult = await runCommand(`sed '/^Script started/d; /^Script done/d' ${ocOutFile} 2>/dev/null || true`);
-                output = fileResult.stdout;
-                console.log('[OpenCodeAgent] File:', output.length, 'bytes');
-            } else {
-                output = result.stdout + (result.stderr ? '\n' + result.stderr : '');
-            }
-
-            // exit 124 = timeout sent SIGTERM.  kill 0 should normally kill
-            // the PTY process group before timeout fires, but treat it as
-            // non-fatal in case of edge cases (e.g., Ollama worker not in group).
+            const output = result.stdout + (result.stderr ? '\n' + result.stderr : '');
+            // exit 124 = timeout sent SIGTERM; exit 137 = SIGKILL (--kill-after).
             const killedByTimeout = exitCode === 124 || exitCode === 137;
 
             console.log(

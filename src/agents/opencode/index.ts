@@ -150,8 +150,12 @@ export class OpenCodeAgent extends BaseAgent {
             let fullCmd: string;
 
             if (useScriptPty) {
-                const opencodeRun = `${envVars} ${opencodeBin} run "$(cat .prompt.md)"`;
-                fullCmd = `unset NODE_OPTIONS; timeout --kill-after=10 300 script -q -e --flush -c '${opencodeRun}' ${ocOutFile}`;
+                // After opencode exits, kill 0 sends SIGTERM to the entire
+                // PTY process group (including orphan Ollama workers holding
+                // the PTY slave fd open).  Without this, script waits for
+                // EOF on the PTY master indefinitely and timeout has to fire.
+                const opencodeRun = `${envVars} ${opencodeBin} run "$(cat .prompt.md)"; kill 0 2>/dev/null`;
+                fullCmd = `unset NODE_OPTIONS; timeout --kill-after=10 240 script -q -e --flush -c '${opencodeRun}' ${ocOutFile}`;
             } else {
                 fullCmd = `${envVars} ${opencodeBin} run "$(cat .prompt.md)" < /dev/null`;
             }
@@ -170,13 +174,14 @@ export class OpenCodeAgent extends BaseAgent {
                 output = result.stdout + (result.stderr ? '\n' + result.stderr : '');
             }
 
-            // exit 124 = timeout sent SIGTERM (expected on ARM64 Linux where
-            // Bun hangs after completing work).  The agent output is still valid.
+            // exit 124 = timeout sent SIGTERM.  kill 0 should normally kill
+            // the PTY process group before timeout fires, but treat it as
+            // non-fatal in case of edge cases (e.g., Ollama worker not in group).
             const killedByTimeout = exitCode === 124 || exitCode === 137;
 
             console.log(
                 '[OpenCodeAgent] exit:', exitCode,
-                killedByTimeout ? '(killed by timeout -- expected Bun ARM64 hang)' : '',
+                killedByTimeout ? '(killed by timeout)' : '',
                 'output:', output.length, 'bytes',
             );
 

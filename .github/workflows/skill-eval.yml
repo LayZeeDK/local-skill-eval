@@ -80,6 +80,8 @@ jobs:
               as: qwen3-4b-skill-eval-opencode-agent
       - name: Setup OpenCode
         uses: ./.github/actions/setup-opencode
+      - name: Pre-pull Docker image for TTY wrapper
+        run: docker pull node:24
       - name: Run agent eval
         timeout-minutes: 15
         env:

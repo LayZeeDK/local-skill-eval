@@ -110,81 +110,59 @@ export class OpenCodeAgent extends BaseAgent {
             instruction,
         ].join('\n');
         const b64 = Buffer.from(prefixedInstruction).toString('base64');
-        await runCommand(`echo '${b64}' | base64 -d > /tmp/.prompt.md`);
+        await runCommand(`echo '${b64}' | base64 -d > .prompt.md`);
 
         try {
             // 5. Invoke opencode with process-level timeout protection.
             //    evalRunner's withTimeout is promise-level only — it rejects the
             //    JS promise but cannot kill the spawned child process, leaving
             //    orphaned opencode/Ollama processes that block CI job cleanup.
-            //    On Linux, wrap with coreutils `timeout` to SIGTERM → SIGKILL
-            //    the entire process group.  On Windows (Git Bash), `timeout` is
-            //    a different command; rely on evalRunner's promise timeout there.
             //    Use OPENCODE_BIN_PATH for local provider (CI setup-opencode sets it);
             //    inside Docker, opencode is installed in-container and on PATH.
             const opencodeBinRaw = (!inDocker && process.env.OPENCODE_BIN_PATH) || 'opencode';
             // Convert Windows backslashes to forward slashes — Git Bash
             // interprets backslashes as escape sequences in command strings.
             const opencodeBin = opencodeBinRaw.replace(/\\/g, '/');
-            // Unset NODE_OPTIONS — V8-specific flags (e.g. --max-old-space-size)
-            // leak into Bun (opencode's runtime, JavaScriptCore) and can cause
-            // OOM on memory-constrained runners by inflating the parent Node.js
-            // heap alongside Ollama's model (~2.5 GB).
-            const envVars = 'OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1 OPENCODE_DISABLE_PROJECT_CONFIG=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1';
-            // Redirect stdin from /dev/null so Bun.stdin.text() gets
-            // immediate EOF instead of blocking on Node.js spawn's pipe.
-            //
-            // On Linux, the local provider spawns bash with pipe stdio
-            // (no TTY).  libc then uses full buffering (~4-8 KB) for
-            // stdout/stderr.  If `timeout` kills opencode before the
-            // buffer fills, the output never reaches the pipe → 0 bytes.
-            // The Docker provider avoids this with `Tty: true` in exec.
-            //
-            // Fix: redirect all output to a file and read it back after
-            // the command completes (or is killed by timeout).  Even if
-            // the process buffer isn't fully flushed, any previously-
-            // flushed content is preserved in the file.
-            // 300s timeout accommodates ARM64 CI Ollama inference speed.
-            const ocOutFile = '/tmp/.opencode-output.log';
             let fullCmd: string;
 
             if (process.platform !== 'win32') {
-                const opencodeRun = `${opencodeBin} run "$(cat /tmp/.prompt.md)" < /dev/null`;
-                // Redirect output to file.  On ARM64 Linux, Bun uses full
-                // buffering (~4-8 KB) and hangs after completing work.
-                // timeout kills it, but unflushed buffer data is lost (0 bytes).
-                // The deterministic grader still works (checks file changes),
-                // but the LLM grader gets no transcript to evaluate.
+                // On Linux, wrap opencode in a Docker container with -t (TTY).
+                // Bun uses full buffering (~4-8 KB) when stdout is a pipe.
+                // `timeout` kills the hung process before the buffer flushes → 0 bytes.
+                // Docker -t allocates a real PTY inside the container → Bun uses
+                // line buffering → output is flushed on each newline and captured.
+                // --network host lets the container reach Ollama on localhost:11434.
                 //
-                // PTY approaches all fail on GitHub Actions:
+                // PTY approaches without Docker all fail on GitHub Actions:
                 // - `script --flush`: PTY session breaks signal delivery (SIGHUP)
                 // - `unbuffer`: interact needs terminal stdout; -p exits on EOF
                 // - Python pty.openpty+fork: os.waitpid blocks past SIGALRM
                 //   (PEP 475 retries on EINTR), orphans hold slave fd open
-                // 300s timeout accommodates ARM64 CI Ollama inference speed.
-                fullCmd = `unset NODE_OPTIONS; ${envVars} timeout --signal=TERM --kill-after=10 300 ${opencodeRun} > ${ocOutFile} 2>&1`;
+                const dockerEnv = [
+                    '-e OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1',
+                    '-e OPENCODE_DISABLE_PROJECT_CONFIG=1',
+                    '-e OPENCODE_DISABLE_EXTERNAL_SKILLS=1',
+                ].join(' ');
+                // Inner timeout (300s) kills opencode if it hangs (Bun ARM64).
+                // Outer timeout (330s) kills Docker if the container itself hangs.
+                // chown restores host UID:GID on workspace files created by
+                // root inside the container, so local provider cleanup works.
+                const innerCmd = 'npm install -g opencode-ai >/dev/null 2>&1 && timeout --signal=TERM --kill-after=10 300 opencode run \\"$(cat .prompt.md)\\" < /dev/null; chown -R $(stat -c %u:%g .) . 2>/dev/null';
+                fullCmd = `unset NODE_OPTIONS; timeout --signal=TERM --kill-after=10 330 docker run --rm -t --network host -v "$(pwd):/workspace" -w /workspace ${dockerEnv} node:24 bash -c '${innerCmd}'`;
             } else {
-                fullCmd = `${envVars} ${opencodeBin} run "$(cat /tmp/.prompt.md)" < /dev/null`;
+                const envVars = 'OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1 OPENCODE_DISABLE_PROJECT_CONFIG=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1';
+                fullCmd = `${envVars} ${opencodeBin} run "$(cat .prompt.md)" < /dev/null`;
             }
 
             console.log('[OpenCodeAgent] Running:', fullCmd.slice(0, 250));
             const result = await runCommand(fullCmd);
 
-            // On Linux, read output from file.  Exit code comes from
-            // the process (timeout returns 124 on SIGTERM kill).
-            // On Windows, use pipe output + process exit code.
-            let output: string;
-            let exitCode: number;
-
-            if (process.platform !== 'win32') {
-                const fileResult = await runCommand(`cat ${ocOutFile} 2>/dev/null || true`);
-                output = fileResult.stdout;
-                exitCode = result.exitCode;
-                console.log('[OpenCodeAgent] Read output from file:', output.length, 'bytes');
-            } else {
-                output = result.stdout + (result.stderr ? '\n' + result.stderr : '');
-                exitCode = result.exitCode;
-            }
+            // Docker -t merges stderr into stdout through the PTY.
+            // On Windows, collect both stdout and stderr.
+            const output = process.platform !== 'win32'
+                ? result.stdout
+                : result.stdout + (result.stderr ? '\n' + result.stderr : '');
+            const exitCode = result.exitCode;
 
             // exit 124 = timeout sent SIGTERM (expected on ARM64 Linux where
             // Bun hangs after completing work).  The agent output is still valid.

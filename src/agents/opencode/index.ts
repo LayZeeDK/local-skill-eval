@@ -173,7 +173,7 @@ export class OpenCodeAgent extends BaseAgent {
                 const ptyScript = `/tmp/.pty-wrapper.py`;
                 const bashCmd = `${envVars} ${timeoutCmd}`;
                 await runCommand(`cat > ${ptyScript} << 'PYEOF'
-import pty, os, sys
+import pty, os, sys, threading
 m, s = pty.openpty()
 pid = os.fork()
 if pid == 0:
@@ -184,7 +184,8 @@ if pid == 0:
     os.execvp("bash", ["bash", "-c", """${bashCmd}"""])
 else:
     os.close(s)
-    with open("${ocOutFile}", "wb") as f:
+    f = open("${ocOutFile}", "wb")
+    def reader():
         while True:
             try:
                 d = os.read(m, 4096)
@@ -192,8 +193,15 @@ else:
                 f.write(d)
                 f.flush()
             except OSError: break
+    t = threading.Thread(target=reader, daemon=True)
+    t.start()
     _, st = os.waitpid(pid, 0)
     ec = os.waitstatus_to_exitcode(st)
+    # Close master fd to unblock reader thread — orphan processes
+    # may still hold the slave fd, keeping os.read() blocked.
+    os.close(m)
+    t.join(timeout=2)
+    f.close()
     open("${ocExitFile}", "w").write(str(ec))
     sys.exit(ec)
 PYEOF`);

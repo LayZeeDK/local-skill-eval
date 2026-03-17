@@ -135,21 +135,13 @@ export class OpenCodeAgent extends BaseAgent {
             if (process.platform !== 'win32') {
                 // On Linux, Bun uses full buffering (~4-8 KB) when stdout is a
                 // pipe.  timeout kills the hung process before the buffer flushes
-                // → 0 bytes.  Fix: use node-pty to give opencode a real PTY
-                // (forces line buffering) and relay output to stdout.
-                // Unlike previous PTY approaches:
-                // - script --flush: PTY session breaks GHA signal delivery
-                // - unbuffer: interact needs terminal stdout; -p exits on EOF
-                // - Python pty: PEP 475 auto-retries waitpid on EINTR
-                // node-pty uses poll()-based I/O internally, avoiding all three.
-                const ptyRelay = path.join(__dirname, 'pty-relay.js').replace(/\\/g, '/');
-                // Wrap in bash -c because the relay uses pty.spawn (can't
-                // handle shell constructs like $() or <).  The inner
-                // < /dev/null is critical — it redirects opencode's stdin
-                // to /dev/null INSIDE the PTY so Bun.stdin.text() gets
-                // EOF instead of blocking on the PTY slave fd.
+                // → 0 bytes.  Fix: use `script --flush` to allocate a real PTY
+                // (forces line buffering).  timeout --kill-after handles the Bun
+                // ARM64 hang and orphan processes holding the PTY session open.
+                // < /dev/null is critical — it redirects opencode's stdin so
+                // Bun.stdin.text() gets EOF instead of blocking.
                 const opencodeRun = `${envVars} ${opencodeBin} run "$(cat .prompt.md)" < /dev/null`;
-                fullCmd = `unset NODE_OPTIONS; node ${ptyRelay} 300 bash -c '${opencodeRun}' > ${ocOutFile} 2>&1`;
+                fullCmd = `unset NODE_OPTIONS; timeout --kill-after=10 300 script -q -e --flush -c '${opencodeRun}' ${ocOutFile} > /dev/null 2>&1`;
             } else {
                 fullCmd = `${envVars} ${opencodeBin} run "$(cat .prompt.md)" < /dev/null`;
             }
@@ -157,23 +149,18 @@ export class OpenCodeAgent extends BaseAgent {
             console.log('[OpenCodeAgent] Running:', fullCmd.slice(0, 250));
             const result = await runCommand(fullCmd);
 
-            // On Linux, read output from file (PTY relay writes to stdout,
-            // which is redirected to the file).
+            // On Linux, read output from script's typescript file.
             // On Windows, use pipe output directly.
             let output: string;
             let exitCode: number;
 
             if (process.platform !== 'win32') {
-                const fileResult = await runCommand(`cat ${ocOutFile} 2>/dev/null || true`);
+                // Read output from script's typescript file, stripping
+                // the "Script started/done" header and footer lines.
+                const fileResult = await runCommand(`sed '/^Script started/d; /^Script done/d' ${ocOutFile} 2>/dev/null || true`);
                 output = fileResult.stdout;
                 exitCode = result.exitCode;
                 console.log('[OpenCodeAgent] Read output from file:', output.length, 'bytes');
-                // Diagnostic log from pty-relay (temporary, for debugging)
-                const diagResult = await runCommand('cat /tmp/.pty-relay-diag.log 2>/dev/null || true');
-
-                if (diagResult.stdout.trim()) {
-                    console.log('[OpenCodeAgent] PTY relay diagnostics:\n' + diagResult.stdout);
-                }
             } else {
                 output = result.stdout + (result.stderr ? '\n' + result.stderr : '');
                 exitCode = result.exitCode;

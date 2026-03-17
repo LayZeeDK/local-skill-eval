@@ -173,7 +173,9 @@ export class OpenCodeAgent extends BaseAgent {
                 const ptyScript = `/tmp/.pty-wrapper.py`;
                 const bashCmd = `${envVars} ${timeoutCmd}`;
                 await runCommand(`cat > ${ptyScript} << 'PYEOF'
-import pty, os, sys, threading
+import pty, os, sys, signal, threading
+# Hard deadline: kill this process if anything hangs.
+signal.alarm(320)
 m, s = pty.openpty()
 pid = os.fork()
 if pid == 0:
@@ -197,8 +199,6 @@ else:
     t.start()
     _, st = os.waitpid(pid, 0)
     ec = os.waitstatus_to_exitcode(st)
-    # Close master fd to unblock reader thread — orphan processes
-    # may still hold the slave fd, keeping os.read() blocked.
     os.close(m)
     t.join(timeout=2)
     f.close()

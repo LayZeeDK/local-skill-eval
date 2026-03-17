@@ -16,7 +16,7 @@
  * This C implementation avoids all three issues:
  *   - No setsid — signals propagate normally
  *   - No stdin dependency — we only relay stdout
- *   - No PEP 475 — EINTR returns immediately in C
+ *   - Uses poll() with timeout — no signal races, no PEP 475
  *
  * Usage: pty-relay <timeout_sec> <command> [args...]
  * Exit:  child's exit code, or 124 if killed by timeout (matches
@@ -26,19 +26,13 @@
  */
 
 #include <errno.h>
+#include <poll.h>
 #include <pty.h>
-#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
-
-static volatile sig_atomic_t got_alarm = 0;
-
-static void alarm_handler(int sig) {
-    (void)sig;
-    got_alarm = 1;
-}
 
 int main(int argc, char *argv[]) {
     if (argc < 3) {
@@ -68,55 +62,74 @@ int main(int argc, char *argv[]) {
         _exit(127);
     }
 
-    /* Parent: relay PTY output to stdout with hard deadline. */
-    struct sigaction sa;
-    sa.sa_handler = alarm_handler;
-    sa.sa_flags = 0;           /* no SA_RESTART — read() must return EINTR */
-    sigemptyset(&sa.sa_mask);
-    sigaction(SIGALRM, &sa, NULL);
-    alarm(timeout_sec + 10);   /* hard deadline: timeout + 10s grace */
+    /* Parent: relay PTY output to stdout using poll() with timeout.
+     * poll() is race-free (no signal-before-syscall window) and does
+     * not suffer from PEP 475 auto-retry since this is plain C. */
+    time_t deadline = time(NULL) + timeout_sec + 10;  /* +10s grace */
+    int timed_out = 0;
+
+    struct pollfd pfd;
+    pfd.fd = master;
+    pfd.events = POLLIN;
 
     char buf[4096];
-    ssize_t n;
 
-    while (!got_alarm) {
-        n = read(master, buf, sizeof(buf));
+    for (;;) {
+        int remaining_ms = (int)(deadline - time(NULL)) * 1000;
 
-        if (n > 0) {
-            /* Write all bytes to stdout.  Partial writes are possible
-             * when stdout is a pipe and the reader is slow. */
-            ssize_t written = 0;
+        if (remaining_ms <= 0) {
+            timed_out = 1;
+            break;
+        }
 
-            while (written < n) {
-                ssize_t w = write(STDOUT_FILENO, buf + written, n - written);
+        int ret = poll(&pfd, 1, remaining_ms);
 
-                if (w < 0) {
-                    if (errno == EINTR) {
-                        continue;
+        if (ret > 0) {
+            if (pfd.revents & (POLLIN | POLLHUP)) {
+                ssize_t n = read(master, buf, sizeof(buf));
+
+                if (n > 0) {
+                    ssize_t written = 0;
+
+                    while (written < n) {
+                        ssize_t w = write(STDOUT_FILENO, buf + written,
+                                          n - written);
+
+                        if (w < 0) {
+                            if (errno == EINTR) {
+                                continue;
+                            }
+
+                            goto done;  /* stdout closed */
+                        }
+
+                        written += w;
                     }
-
-                    break;  /* stdout closed or error */
+                } else if (n == 0 || errno == EIO) {
+                    break;  /* EOF or child exited */
+                } else if (errno != EINTR) {
+                    break;  /* unexpected error */
                 }
-
-                written += w;
             }
-        } else if (n == 0) {
-            break;  /* EOF — all slave fds closed */
+
+            if (pfd.revents & (POLLERR | POLLNVAL)) {
+                break;  /* master fd error */
+            }
+        } else if (ret == 0) {
+            timed_out = 1;
+            break;  /* poll timeout */
         } else {
-            /* n < 0 */
             if (errno == EINTR) {
-                continue;  /* interrupted by signal, check got_alarm */
+                continue;
             }
 
-            if (errno == EIO) {
-                break;  /* child exited, PTY slave closed */
-            }
-
-            break;  /* unexpected error */
+            break;  /* poll error */
         }
     }
 
+done:
     /* Reap child (non-blocking to avoid hanging on orphans). */
+    ;
     int status = 0;
     pid_t w = waitpid(pid, &status, WNOHANG);
 
@@ -134,7 +147,7 @@ int main(int argc, char *argv[]) {
 
     close(master);
 
-    if (got_alarm) {
+    if (timed_out) {
         return 124;  /* match coreutils timeout exit code */
     }
 

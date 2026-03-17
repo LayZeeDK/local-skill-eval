@@ -13,59 +13,6 @@ import * as fs from 'fs';
  */
 const OPENCODE_MODEL = 'qwen3-4b-skill-eval-opencode-agent';
 
-/**
- * Parse opencode --format json output into a human-readable transcript.
- * Each line is a JSON event: tool_use, text, step_start, step_finish, error.
- * Returns a formatted string suitable for LLM grading.
- */
-function parseJsonEvents(raw: string): string {
-    const lines: string[] = [];
-
-    for (const line of raw.split('\n')) {
-        const trimmed = line.trim();
-
-        if (!trimmed || !trimmed.startsWith('{')) {
-            continue;
-        }
-
-        try {
-            const event = JSON.parse(trimmed);
-
-            if (event.type === 'text' && event.part?.text) {
-                lines.push(`[assistant] ${event.part.text}`);
-            } else if (event.type === 'tool_use' && event.part) {
-                const tool = event.part.tool || 'unknown';
-                const state = event.part.state || {};
-                const input = state.input || {};
-                const status = state.status || '';
-
-                if (tool === 'bash' && input.command) {
-                    lines.push(`[tool] bash: ${input.command}`);
-
-                    if (status === 'completed' && state.output) {
-                        lines.push(`[output] ${state.output}`);
-                    } else if (status === 'error' && state.error) {
-                        lines.push(`[error] ${state.error}`);
-                    }
-                } else if (tool === 'edit' && input.filePath) {
-                    lines.push(`[tool] edit: ${input.filePath}`);
-                } else if (tool === 'write' && input.filePath) {
-                    lines.push(`[tool] write: ${input.filePath}`);
-                } else if (tool === 'read' && input.filePath) {
-                    lines.push(`[tool] read: ${input.filePath}`);
-                } else {
-                    lines.push(`[tool] ${tool}: ${JSON.stringify(input).slice(0, 200)}`);
-                }
-            } else if (event.type === 'error' && event.error) {
-                lines.push(`[error] ${JSON.stringify(event.error)}`);
-            }
-        } catch {
-            // Skip malformed JSON lines
-        }
-    }
-
-    return lines.join('\n');
-}
 
 /**
  * OpenCodeAgent -- wraps the `opencode run` CLI with config injection,
@@ -203,7 +150,7 @@ export class OpenCodeAgent extends BaseAgent {
             let fullCmd: string;
 
             if (useScriptPty) {
-                const opencodeRun = `${envVars} ${opencodeBin} run --format json "$(cat .prompt.md)"`;
+                const opencodeRun = `${envVars} ${opencodeBin} run "$(cat .prompt.md)"`;
                 fullCmd = `unset NODE_OPTIONS; timeout --kill-after=10 300 script -q -e --flush -c '${opencodeRun}' ${ocOutFile}`;
             } else {
                 fullCmd = `${envVars} ${opencodeBin} run "$(cat .prompt.md)" < /dev/null`;
@@ -216,10 +163,9 @@ export class OpenCodeAgent extends BaseAgent {
             const exitCode = result.exitCode;
 
             if (useScriptPty) {
-                const fileResult = await runCommand(`cat ${ocOutFile} 2>/dev/null || true`);
-                const rawFile = fileResult.stdout;
-                output = parseJsonEvents(rawFile);
-                console.log('[OpenCodeAgent] File:', rawFile.length, 'bytes raw, parsed:', output.length, 'bytes');
+                const fileResult = await runCommand(`sed '/^Script started/d; /^Script done/d' ${ocOutFile} 2>/dev/null || true`);
+                output = fileResult.stdout;
+                console.log('[OpenCodeAgent] File:', output.length, 'bytes');
             } else {
                 output = result.stdout + (result.stderr ? '\n' + result.stderr : '');
             }

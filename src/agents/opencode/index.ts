@@ -132,10 +132,7 @@ export class OpenCodeAgent extends BaseAgent {
             const versionCheck = await runCommand(`unset NODE_OPTIONS; timeout 10 ${opencodeBin} --version 2>&1 || echo "[WARN] --version failed/timed-out"`);
             console.log('[OpenCodeAgent] --version:', versionCheck.stdout.slice(0, 100).trim());
 
-            // OPENCODE_DISABLE_PROJECT_CONFIG: skip repo .claude/ config loading
-            // to avoid polluting model context with project settings.
-            // External skills (.agents/skills/) left enabled for SKILL.md discovery.
-            const fullCmd = `OPENCODE_DISABLE_PROJECT_CONFIG=1 ${opencodeBin} run "$(cat .prompt.md)"`;
+            const fullCmd = `${opencodeBin} run "$(cat .prompt.md)"`;
 
             console.log('[OpenCodeAgent] Running:', fullCmd.slice(0, 250));
             const result = await runCommand(fullCmd);

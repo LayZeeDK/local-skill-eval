@@ -78,24 +78,32 @@ jobs:
         uses: ./.github/actions/setup-opencode
       - name: PTY smoke test
         run: |
-          echo "--- Layer 0: diagnose env + state differences ---"
-          echo "OPENCODE_DISABLE_AUTOUPDATE=${OPENCODE_DISABLE_AUTOUPDATE:-<unset>}"
-          echo "OPENCODE_BIN_PATH=${OPENCODE_BIN_PATH:-<unset>}"
-          echo "opencode data dir:"
-          ls -la ~/.local/share/opencode/ 2>/dev/null || echo "  (not found)"
-          echo "opencode db locks:"
-          ls -la ~/.local/share/opencode/*.lock ~/.local/share/opencode/*-wal ~/.local/share/opencode/*-shm 2>/dev/null || echo "  (no locks)"
-          echo "fuser on opencode.db:"
-          fuser ~/.local/share/opencode/opencode.db 2>/dev/null || echo "  (not locked by any process)"
+          echo "--- Layer 0: env var binary search ---"
+          echo "Full env var count: $(env | wc -l)"
+          echo "GITHUB_ vars: $(env | grep ^GITHUB_ | wc -l)"
+          echo "RUNNER_ vars: $(env | grep ^RUNNER_ | wc -l)"
+          echo "ACTIONS_ vars: $(env | grep ^ACTIONS_ | wc -l)"
 
-          echo "--- Layer 0a: bare opencode --version (same as setup-opencode) ---"
-          timeout 10 $OPENCODE_BIN_PATH --version || echo "L0a HUNG"
+          echo "--- L0a: full env (expect HUNG) ---"
+          timeout 5 $OPENCODE_BIN_PATH --version || echo "L0a HUNG"
 
-          echo "--- Layer 0b: opencode --version WITHOUT OPENCODE_DISABLE_AUTOUPDATE ---"
-          timeout 10 env -u OPENCODE_DISABLE_AUTOUPDATE $OPENCODE_BIN_PATH --version || echo "L0b HUNG"
+          echo "--- L0b: clean env (expect OK) ---"
+          timeout 5 env -i PATH="$PATH" HOME="$HOME" $OPENCODE_BIN_PATH --version || echo "L0b HUNG"
 
-          echo "--- Layer 0c: opencode --version with clean env (only PATH) ---"
-          timeout 10 env -i PATH="$PATH" HOME="$HOME" $OPENCODE_BIN_PATH --version || echo "L0c HUNG"
+          echo "--- L0c: clean + GITHUB_ vars ---"
+          timeout 5 env -i PATH="$PATH" HOME="$HOME" $(env | grep ^GITHUB_ | tr '\n' ' ') $OPENCODE_BIN_PATH --version || echo "L0c HUNG"
+
+          echo "--- L0d: clean + RUNNER_ vars ---"
+          timeout 5 env -i PATH="$PATH" HOME="$HOME" $(env | grep ^RUNNER_ | tr '\n' ' ') $OPENCODE_BIN_PATH --version || echo "L0d HUNG"
+
+          echo "--- L0e: clean + ACTIONS_ vars ---"
+          timeout 5 env -i PATH="$PATH" HOME="$HOME" $(env | grep ^ACTIONS_ | tr '\n' ' ') $OPENCODE_BIN_PATH --version || echo "L0e HUNG"
+
+          echo "--- L0f: clean + all OPENCODE_ vars ---"
+          timeout 5 env -i PATH="$PATH" HOME="$HOME" $(env | grep ^OPENCODE_ | tr '\n' ' ') $OPENCODE_BIN_PATH --version || echo "L0f HUNG"
+
+          echo "--- L0g: clean + CI/AGENT vars ---"
+          timeout 5 env -i PATH="$PATH" HOME="$HOME" CI=true AGENT=1 $OPENCODE_BIN_PATH --version || echo "L0g HUNG"
 
           echo "--- Layer 1: script captures basic echo ---"
           script -q -e --flush -c 'echo hello-from-pty' /tmp/t1.log

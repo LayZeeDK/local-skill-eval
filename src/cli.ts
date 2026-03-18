@@ -222,26 +222,11 @@ async function main() {
 
             // Smoke test gate for OpenCode agent
             if (agentType === 'opencode') {
-                // Unload non-agent models to free RAM/CPU (same pattern as ollama agent)
-                try {
-                    const { Ollama } = require('ollama');
-                    const client = new Ollama({ host: 'http://localhost:11434' });
-                    const running = await client.ps();
-                    const agentModel = DEFAULT_OLLAMA_AGENT_CONFIG.model;
-                    const others = running.models.filter((m: any) => !m.name.startsWith(agentModel));
-
-                    for (const model of others) {
-                        await client.chat({ model: model.name, messages: [], keep_alive: 0 });
-                    }
-
-                    if (others.length > 0) {
-                        console.log(`[INFO] Unloaded ${others.length} non-agent model(s) to free resources`);
-                    }
-                } catch {
-                    // Ignore -- Ollama may not be running yet
-                }
-
-                // Smoke test: verify opencode binary exists and Ollama is reachable
+                // Smoke test: verify Ollama is reachable.
+                // Do NOT unload models here — the opencode agent model
+                // (qwen3-4b-skill-eval-opencode-agent) may already be warm.
+                // Unloading it forces a cold reload (~30s) that exceeds
+                // opencode's internal request timeout.
                 try {
                     const { Ollama } = require('ollama');
                     const client = new Ollama({ host: 'http://localhost:11434' });

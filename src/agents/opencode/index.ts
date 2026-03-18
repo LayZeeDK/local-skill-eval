@@ -132,28 +132,19 @@ export class OpenCodeAgent extends BaseAgent {
             const versionCheck = await runCommand(`unset NODE_OPTIONS; timeout 10 ${opencodeBin} --version 2>&1 || echo "[WARN] --version failed/timed-out"`);
             console.log('[OpenCodeAgent] --version:', versionCheck.stdout.slice(0, 100).trim());
 
-            // Environment setup for opencode invocation:
-            // - Unset NODE_OPTIONS: V8-specific flags leak into Bun/JSC runtime.
-            // - OPENCODE_DISABLE_CLAUDE_CODE_PROMPT: skip ~/.claude/CLAUDE.md loading.
-            // - OPENCODE_DISABLE_PROJECT_CONFIG: skip repo .claude/settings loading.
-            // External skills (.agents/skills/, .claude/skills/) are left enabled
-            // so opencode discovers SKILL.md files injected by the eval provider.
-            const envPrefix = [
-                'unset NODE_OPTIONS;',
-                'OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1',
-                'OPENCODE_DISABLE_PROJECT_CONFIG=1',
-            ].join(' ');
-
+            // OPENCODE_DISABLE_PROJECT_CONFIG: skip repo .claude/ config loading
+            // to avoid polluting model context with project settings.
+            // External skills (.agents/skills/) left enabled for SKILL.md discovery.
             const isLinuxLocal = !inDocker && process.platform !== 'win32';
-            const innerCmd = `${envPrefix} ${opencodeBin} run "$(cat .prompt.md)" < /dev/null`;
+            const opencodeCmd = `OPENCODE_DISABLE_PROJECT_CONFIG=1 ${opencodeBin} run "$(cat .prompt.md)"`;
             let fullCmd: string;
 
             if (isLinuxLocal) {
-                // timeout provides process-level kill; bash -c interprets the
-                // env var prefix and shell redirects.
-                fullCmd = `timeout --kill-after=10 240 bash -c '${innerCmd}'`;
+                // timeout provides process-level kill so a stuck opencode
+                // doesn't block the CI job until the step timeout.
+                fullCmd = `timeout --kill-after=10 240 bash -c '${opencodeCmd}'`;
             } else {
-                fullCmd = innerCmd;
+                fullCmd = opencodeCmd;
             }
 
             console.log('[OpenCodeAgent] Running:', fullCmd.slice(0, 250));

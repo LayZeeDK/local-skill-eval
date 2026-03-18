@@ -78,9 +78,24 @@ jobs:
         uses: ./.github/actions/setup-opencode
       - name: PTY smoke test
         run: |
-          echo "--- Layer 0: bare opencode --version (same as setup-opencode) ---"
-          timeout 10 $OPENCODE_BIN_PATH --version || echo "L0 HUNG"
-          echo "L0 exit=$?"
+          echo "--- Layer 0: diagnose env + state differences ---"
+          echo "OPENCODE_DISABLE_AUTOUPDATE=${OPENCODE_DISABLE_AUTOUPDATE:-<unset>}"
+          echo "OPENCODE_BIN_PATH=${OPENCODE_BIN_PATH:-<unset>}"
+          echo "opencode data dir:"
+          ls -la ~/.local/share/opencode/ 2>/dev/null || echo "  (not found)"
+          echo "opencode db locks:"
+          ls -la ~/.local/share/opencode/*.lock ~/.local/share/opencode/*-wal ~/.local/share/opencode/*-shm 2>/dev/null || echo "  (no locks)"
+          echo "fuser on opencode.db:"
+          fuser ~/.local/share/opencode/opencode.db 2>/dev/null || echo "  (not locked by any process)"
+
+          echo "--- Layer 0a: bare opencode --version (same as setup-opencode) ---"
+          timeout 10 $OPENCODE_BIN_PATH --version || echo "L0a HUNG"
+
+          echo "--- Layer 0b: opencode --version WITHOUT OPENCODE_DISABLE_AUTOUPDATE ---"
+          timeout 10 env -u OPENCODE_DISABLE_AUTOUPDATE $OPENCODE_BIN_PATH --version || echo "L0b HUNG"
+
+          echo "--- Layer 0c: opencode --version with clean env (only PATH) ---"
+          timeout 10 env -i PATH="$PATH" HOME="$HOME" $OPENCODE_BIN_PATH --version || echo "L0c HUNG"
 
           echo "--- Layer 1: script captures basic echo ---"
           script -q -e --flush -c 'echo hello-from-pty' /tmp/t1.log

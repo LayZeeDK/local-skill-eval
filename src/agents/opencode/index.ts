@@ -113,9 +113,12 @@ export class OpenCodeAgent extends BaseAgent {
             //    evalRunner's withTimeout is promise-level only — it rejects the
             //    JS promise but cannot kill the spawned child process, leaving
             //    orphaned opencode/Ollama processes that block CI job cleanup.
-            //    Use OPENCODE_BIN_PATH for local provider (CI setup-opencode sets it);
-            //    inside Docker, opencode is installed in-container and on PATH.
-            const opencodeBinRaw = (!inDocker && process.env.OPENCODE_BIN_PATH) || 'opencode';
+            //    Use OPENCODE_CLI_PATH for local provider (CI setup-opencode sets it).
+            //    NOT OPENCODE_BIN_PATH — opencode's launcher script reads that env
+            //    var and spawnSync's it, causing infinite recursion when it points
+            //    at the launcher itself.
+            //    Inside Docker, opencode is installed in-container and on PATH.
+            const opencodeBinRaw = (!inDocker && process.env.OPENCODE_CLI_PATH) || 'opencode';
             // Convert Windows backslashes to forward slashes — Git Bash
             // interprets backslashes as escape sequences in command strings.
             const opencodeBin = opencodeBinRaw.replace(/\\/g, '/');
@@ -128,45 +131,28 @@ export class OpenCodeAgent extends BaseAgent {
             const versionCheck = await runCommand(`unset NODE_OPTIONS; timeout 10 ${opencodeBin} --version 2>&1 || echo "[WARN] --version failed/timed-out"`);
             console.log('[OpenCodeAgent] --version:', versionCheck.stdout.slice(0, 100).trim());
 
-            // Unset NODE_OPTIONS — V8-specific flags (e.g. --max-old-space-size)
-            // leak into Bun (opencode's runtime, JavaScriptCore) and can cause
-            // OOM on memory-constrained runners by inflating the parent Node.js
-            // heap alongside Ollama's model (~2.5 GB).
-            const envVars = 'OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1';
+            // Environment setup for opencode invocation:
+            // - Unset NODE_OPTIONS: V8-specific flags leak into Bun/JSC runtime.
+            // - OPENCODE_DISABLE_CLAUDE_CODE_PROMPT: skip ~/.claude/CLAUDE.md loading.
+            // - OPENCODE_DISABLE_EXTERNAL_SKILLS: skip skill discovery.
+            // - OPENCODE_DISABLE_PROJECT_CONFIG: skip repo .claude/settings loading.
+            const envPrefix = [
+                'unset NODE_OPTIONS;',
+                'OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1',
+                'OPENCODE_DISABLE_EXTERNAL_SKILLS=1',
+                'OPENCODE_DISABLE_PROJECT_CONFIG=1',
+            ].join(' ');
 
-            // Approach 11: PTY stdout + /dev/null stdin via script --flush.
-            //
-            // On the GHA ARM64 runner, opencode (Bun/JavaScriptCore) produces
-            // zero bytes to pipe stdout — confirmed by smoke tests L4/L4b/L4c
-            // (0 bytes even with explicit < /dev/null). Docker works because
-            // docker exec Tty:true gives opencode a PTY stdout that Bun
-            // flushes synchronously.
-            //
-            // script --flush allocates a real PTY for stdout and captures
-            // output to a typescript file. We redirect opencode's stdin to
-            // /dev/null INSIDE the script -c command so Bun.stdin.text()
-            // gets immediate EOF (not a PTY, which triggers TUI mode).
-            //
-            // On Windows/macOS (local dev), script is not used — pipe stdout
-            // works fine there.  Docker provider already has Tty:true.
             const isLinuxLocal = !inDocker && process.platform !== 'win32';
-            const ocOutFile = '/tmp/.opencode-output.log';
-            // Inner command: shell interprets VAR=value prefix and < /dev/null redirect.
-            const opencodeRun = `${envVars} ${opencodeBin} run "$(cat .prompt.md)" < /dev/null`;
+            const innerCmd = `${envPrefix} ${opencodeBin} run "$(cat .prompt.md)" < /dev/null`;
             let fullCmd: string;
 
             if (isLinuxLocal) {
-                // script --flush: PTY stdout captured to ocOutFile.
-                // -q suppresses headers on some distros (Ubuntu 24.04 still
-                // prints them — we strip them when reading the file).
-                // -e returns the child's exit code.
-                // The ; kill 0 ensures PTY process group is cleaned up after
-                // opencode exits, preventing orphaned Ollama workers from
-                // holding the PTY slave fd open (which makes script hang).
-                const scriptCmd = `script -q -e --flush -c '${opencodeRun}; kill 0 2>/dev/null' ${ocOutFile}`;
-                fullCmd = `unset NODE_OPTIONS; timeout --kill-after=10 240 ${scriptCmd}`;
+                // timeout provides process-level kill; bash -c interprets the
+                // env var prefix and shell redirects.
+                fullCmd = `timeout --kill-after=10 240 bash -c '${innerCmd}'`;
             } else {
-                fullCmd = opencodeRun;
+                fullCmd = innerCmd;
             }
 
             console.log('[OpenCodeAgent] Running:', fullCmd.slice(0, 250));
@@ -176,19 +162,7 @@ export class OpenCodeAgent extends BaseAgent {
             // exit 124 = timeout sent SIGTERM; exit 137 = SIGKILL (--kill-after).
             const killedByTimeout = exitCode === 124 || exitCode === 137;
 
-            let output: string;
-
-            if (isLinuxLocal) {
-                // Read from script's typescript file. Strip "Script started..."
-                // and "Script done..." header/footer lines that Ubuntu 24.04
-                // writes even with -q flag.
-                const fileResult = await runCommand(
-                    `sed '/^Script started/d; /^Script done/d' ${ocOutFile} 2>/dev/null || true`,
-                );
-                output = fileResult.stdout;
-            } else {
-                output = result.stdout + (result.stderr ? '\n' + result.stderr : '');
-            }
+            const output = result.stdout + (result.stderr ? '\n' + result.stderr : '');
 
             console.log(
                 '[OpenCodeAgent] exit:', exitCode,

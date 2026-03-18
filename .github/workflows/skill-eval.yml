@@ -83,25 +83,25 @@ jobs:
           env | grep ^OPENCODE_ | sort
 
           echo "--- L0a: full env (expect HUNG) ---"
-          timeout 5 $OPENCODE_BIN_PATH --version || echo "L0a HUNG"
+          timeout 5 $OPENCODE_CLI_PATH --version || echo "L0a HUNG"
 
           echo "--- L0b: clean env (expect OK) ---"
-          timeout 5 env -i PATH="$PATH" HOME="$HOME" $OPENCODE_BIN_PATH --version || echo "L0b HUNG"
+          timeout 5 env -i PATH="$PATH" HOME="$HOME" $OPENCODE_CLI_PATH --version || echo "L0b HUNG"
 
           echo "--- L0c: clean + OPENCODE_DISABLE_AUTOUPDATE only ---"
-          timeout 5 env -i PATH="$PATH" HOME="$HOME" OPENCODE_DISABLE_AUTOUPDATE=true $OPENCODE_BIN_PATH --version || echo "L0c HUNG"
+          timeout 5 env -i PATH="$PATH" HOME="$HOME" OPENCODE_DISABLE_AUTOUPDATE=true $OPENCODE_CLI_PATH --version || echo "L0c HUNG"
 
           echo "--- L0d: clean + OPENCODE_BIN_PATH only ---"
-          timeout 5 env -i PATH="$PATH" HOME="$HOME" OPENCODE_BIN_PATH="$OPENCODE_BIN_PATH" $OPENCODE_BIN_PATH --version || echo "L0d HUNG"
+          timeout 5 env -i PATH="$PATH" HOME="$HOME" OPENCODE_BIN_PATH="$OPENCODE_CLI_PATH" $OPENCODE_CLI_PATH --version || echo "L0d HUNG"
 
           echo "--- L0e: clean + both OPENCODE_ vars ---"
-          timeout 5 env -i PATH="$PATH" HOME="$HOME" OPENCODE_DISABLE_AUTOUPDATE=true OPENCODE_BIN_PATH="$OPENCODE_BIN_PATH" $OPENCODE_BIN_PATH --version || echo "L0e HUNG"
+          timeout 5 env -i PATH="$PATH" HOME="$HOME" OPENCODE_DISABLE_AUTOUPDATE=true OPENCODE_BIN_PATH="$OPENCODE_CLI_PATH" $OPENCODE_CLI_PATH --version || echo "L0e HUNG"
 
           echo "--- L0f: full env minus OPENCODE_ vars ---"
-          timeout 5 env -u OPENCODE_DISABLE_AUTOUPDATE -u OPENCODE_BIN_PATH $OPENCODE_BIN_PATH --version || echo "L0f HUNG"
+          timeout 5 env -u OPENCODE_DISABLE_AUTOUPDATE -u OPENCODE_BIN_PATH $OPENCODE_CLI_PATH --version || echo "L0f HUNG"
 
           echo "--- L0g: full env minus all OPENCODE_ + GITHUB_ + RUNNER_ ---"
-          timeout 5 env -i PATH="$PATH" HOME="$HOME" CI="${CI:-}" LANG="${LANG:-}" TERM="${TERM:-}" XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-}" $OPENCODE_BIN_PATH --version || echo "L0g HUNG"
+          timeout 5 env -i PATH="$PATH" HOME="$HOME" CI="${CI:-}" LANG="${LANG:-}" TERM="${TERM:-}" XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-}" $OPENCODE_CLI_PATH --version || echo "L0g HUNG"
 
           echo "--- Layer 1: script captures basic echo ---"
           script -q -e --flush -c 'echo hello-from-pty' /tmp/t1.log
@@ -114,39 +114,39 @@ jobs:
           cat /tmp/t2.log
 
           echo "--- Layer 3: opencode --version to PTY ---"
-          timeout 15 script -q -e --flush -c "$OPENCODE_BIN_PATH --version" /tmp/t3.log || true
+          timeout 15 script -q -e --flush -c "$OPENCODE_CLI_PATH --version" /tmp/t3.log || true
           echo "L3 bytes=$(wc -c < /tmp/t3.log)"
           cat /tmp/t3.log
 
           echo "--- Layer 3b: opencode --version via script with /dev/null stdin (approach 11) ---"
-          timeout 15 script -q -e --flush -c "$OPENCODE_BIN_PATH --version < /dev/null" /tmp/t3b.log || true
+          timeout 15 script -q -e --flush -c "$OPENCODE_CLI_PATH --version < /dev/null" /tmp/t3b.log || true
           echo "L3b bytes=$(wc -c < /tmp/t3b.log)"
           cat /tmp/t3b.log
 
           echo "--- Layer 4: opencode --version to pipe (inherited GHA stdin) ---"
           echo "NODE_OPTIONS=${NODE_OPTIONS:-<unset>}"
-          timeout 15 $OPENCODE_BIN_PATH --version > /tmp/t4.log 2>&1 || true
+          timeout 15 $OPENCODE_CLI_PATH --version > /tmp/t4.log 2>&1 || true
           echo "L4 bytes=$(wc -c < /tmp/t4.log)"
           cat /tmp/t4.log
 
           echo "--- Layer 4b: opencode --version with explicit /dev/null stdin ---"
-          timeout 10 $OPENCODE_BIN_PATH --version < /dev/null > /tmp/t4b.log 2>&1 || true
+          timeout 10 $OPENCODE_CLI_PATH --version < /dev/null > /tmp/t4b.log 2>&1 || true
           echo "L4b bytes=$(wc -c < /tmp/t4b.log)"
           cat /tmp/t4b.log
 
           echo "--- Layer 4c: opencode --version with unset NODE_OPTIONS ---"
-          timeout 10 env -u NODE_OPTIONS $OPENCODE_BIN_PATH --version < /dev/null > /tmp/t4c.log 2>&1 || true
+          timeout 10 env -u NODE_OPTIONS $OPENCODE_CLI_PATH --version < /dev/null > /tmp/t4c.log 2>&1 || true
           echo "L4c bytes=$(wc -c < /tmp/t4c.log)"
           cat /tmp/t4c.log
 
           echo "--- Layer 5: opencode run to PTY (15s, expect partial) ---"
           echo "Say hello" > /tmp/smoke-prompt.md
-          timeout --kill-after=5 15 script -q -e --flush -c "OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1 $OPENCODE_BIN_PATH run \"\$(cat /tmp/smoke-prompt.md)\"" /tmp/t5.log || true
+          timeout --kill-after=5 15 script -q -e --flush -c "OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1 $OPENCODE_CLI_PATH run \"\$(cat /tmp/smoke-prompt.md)\"" /tmp/t5.log || true
           echo "L5 bytes=$(wc -c < /tmp/t5.log)"
           cat /tmp/t5.log
 
           echo "--- Layer 6: opencode run to pipe (for comparison) ---"
-          timeout --kill-after=5 15 bash -c "OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1 $OPENCODE_BIN_PATH run \"\$(cat /tmp/smoke-prompt.md)\" < /dev/null" > /tmp/t6.log 2>&1 || true
+          timeout --kill-after=5 15 bash -c "OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1 $OPENCODE_CLI_PATH run \"\$(cat /tmp/smoke-prompt.md)\" < /dev/null" > /tmp/t6.log 2>&1 || true
           echo "L6 bytes=$(wc -c < /tmp/t6.log)"
           cat /tmp/t6.log
       - name: Run agent eval

@@ -1,5 +1,5 @@
 name: 'Setup OpenCode'
-description: 'Install opencode CLI, export OPENCODE_BIN_PATH, disable auto-update, verify installation'
+description: 'Install opencode CLI, export OPENCODE_CLI_PATH, disable auto-update, verify installation'
 inputs:
   version:
     description: 'OpenCode version to install'
@@ -19,7 +19,10 @@ runs:
           echo "[FAIL] opencode not found"
           exit 1
         fi
-        echo "OPENCODE_BIN_PATH=$OPENCODE_PATH" >> "$GITHUB_ENV"
+        # Use OPENCODE_CLI_PATH, NOT OPENCODE_BIN_PATH. The opencode launcher
+        # script (bin/opencode) reads OPENCODE_BIN_PATH and spawnSync's it —
+        # pointing it at the launcher itself creates an infinite recursion.
+        echo "OPENCODE_CLI_PATH=$OPENCODE_PATH" >> "$GITHUB_ENV"
         echo "OPENCODE_DISABLE_AUTOUPDATE=true" >> "$GITHUB_ENV"
         echo "[INFO] Architecture: $(uname -m)"
         # Try opencode --version with 10s timeout (may hang due to Bun runtime init)

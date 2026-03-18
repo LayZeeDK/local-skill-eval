@@ -116,14 +116,18 @@ export class OpenCodeAgent extends BaseAgent {
             //    recursion), so the launcher resolves the platform binary itself.
             const opencodeBin = ((!inDocker && process.env.OPENCODE_BIN_PATH) || 'opencode')
                 .replace(/\\/g, '/');
-            // OPENCODE_DISABLE_EXTERNAL_SKILLS: opencode's skill injection adds
-            // ~5K tokens to the prompt (system prompt + tool descriptions + skills).
-            // With a 4B model at num_ctx 4096, the total prompt (~10K) exceeds the
-            // context window and Ollama truncates it. Disable external skills to
-            // keep the prompt under 4K. The task instruction already contains the
-            // required workflow steps.
+            // Disable opencode features that inflate the prompt beyond num_ctx 4096:
+            // - CLAUDE_CODE_PROMPT: ~/.claude/CLAUDE.md system instructions
+            // - EXTERNAL_SKILLS: .agents/skills/ SKILL.md injection (~5K tokens)
+            // - PROJECT_CONFIG: repo .claude/ settings, AGENTS.md instructions
+            // The task instruction already contains the required workflow steps.
+            const envFlags = [
+                'OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1',
+                'OPENCODE_DISABLE_EXTERNAL_SKILLS=1',
+                'OPENCODE_DISABLE_PROJECT_CONFIG=1',
+            ].join(' ');
             const result = await runCommand(
-                `OPENCODE_DISABLE_EXTERNAL_SKILLS=1 ${opencodeBin} run "$(cat .prompt.md)"`,
+                `${envFlags} ${opencodeBin} run "$(cat .prompt.md)"`,
             );
             const output = result.stdout + (result.stderr ? '\n' + result.stderr : '');
 

@@ -78,11 +78,9 @@ jobs:
         uses: ./.github/actions/setup-opencode
       - name: PTY smoke test
         run: |
-          echo "--- Layer 0: env var binary search ---"
-          echo "Full env var count: $(env | wc -l)"
-          echo "GITHUB_ vars: $(env | grep ^GITHUB_ | wc -l)"
-          echo "RUNNER_ vars: $(env | grep ^RUNNER_ | wc -l)"
-          echo "ACTIONS_ vars: $(env | grep ^ACTIONS_ | wc -l)"
+          echo "--- Layer 0: isolate OPENCODE_ env vars ---"
+          echo "OPENCODE_ vars:"
+          env | grep ^OPENCODE_ | sort
 
           echo "--- L0a: full env (expect HUNG) ---"
           timeout 5 $OPENCODE_BIN_PATH --version || echo "L0a HUNG"
@@ -90,20 +88,20 @@ jobs:
           echo "--- L0b: clean env (expect OK) ---"
           timeout 5 env -i PATH="$PATH" HOME="$HOME" $OPENCODE_BIN_PATH --version || echo "L0b HUNG"
 
-          echo "--- L0c: clean + GITHUB_ vars ---"
-          timeout 5 env -i PATH="$PATH" HOME="$HOME" $(env | grep ^GITHUB_ | tr '\n' ' ') $OPENCODE_BIN_PATH --version || echo "L0c HUNG"
+          echo "--- L0c: clean + OPENCODE_DISABLE_AUTOUPDATE only ---"
+          timeout 5 env -i PATH="$PATH" HOME="$HOME" OPENCODE_DISABLE_AUTOUPDATE=true $OPENCODE_BIN_PATH --version || echo "L0c HUNG"
 
-          echo "--- L0d: clean + RUNNER_ vars ---"
-          timeout 5 env -i PATH="$PATH" HOME="$HOME" $(env | grep ^RUNNER_ | tr '\n' ' ') $OPENCODE_BIN_PATH --version || echo "L0d HUNG"
+          echo "--- L0d: clean + OPENCODE_BIN_PATH only ---"
+          timeout 5 env -i PATH="$PATH" HOME="$HOME" OPENCODE_BIN_PATH="$OPENCODE_BIN_PATH" $OPENCODE_BIN_PATH --version || echo "L0d HUNG"
 
-          echo "--- L0e: clean + ACTIONS_ vars ---"
-          timeout 5 env -i PATH="$PATH" HOME="$HOME" $(env | grep ^ACTIONS_ | tr '\n' ' ') $OPENCODE_BIN_PATH --version || echo "L0e HUNG"
+          echo "--- L0e: clean + both OPENCODE_ vars ---"
+          timeout 5 env -i PATH="$PATH" HOME="$HOME" OPENCODE_DISABLE_AUTOUPDATE=true OPENCODE_BIN_PATH="$OPENCODE_BIN_PATH" $OPENCODE_BIN_PATH --version || echo "L0e HUNG"
 
-          echo "--- L0f: clean + all OPENCODE_ vars ---"
-          timeout 5 env -i PATH="$PATH" HOME="$HOME" $(env | grep ^OPENCODE_ | tr '\n' ' ') $OPENCODE_BIN_PATH --version || echo "L0f HUNG"
+          echo "--- L0f: full env minus OPENCODE_ vars ---"
+          timeout 5 env -u OPENCODE_DISABLE_AUTOUPDATE -u OPENCODE_BIN_PATH $OPENCODE_BIN_PATH --version || echo "L0f HUNG"
 
-          echo "--- L0g: clean + CI/AGENT vars ---"
-          timeout 5 env -i PATH="$PATH" HOME="$HOME" CI=true AGENT=1 $OPENCODE_BIN_PATH --version || echo "L0g HUNG"
+          echo "--- L0g: full env minus all OPENCODE_ + GITHUB_ + RUNNER_ ---"
+          timeout 5 env -i PATH="$PATH" HOME="$HOME" CI="${CI:-}" LANG="${LANG:-}" TERM="${TERM:-}" XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-}" $OPENCODE_BIN_PATH --version || echo "L0g HUNG"
 
           echo "--- Layer 1: script captures basic echo ---"
           script -q -e --flush -c 'echo hello-from-pty' /tmp/t1.log

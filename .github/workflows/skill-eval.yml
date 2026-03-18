@@ -78,30 +78,24 @@ jobs:
         uses: ./.github/actions/setup-opencode
       - name: PTY smoke test
         run: |
-          echo "--- Layer 0: isolate OPENCODE_ env vars ---"
-          echo "OPENCODE_ vars:"
-          env | grep ^OPENCODE_ | sort
+          echo "--- Layer 0: opencode binary layout ---"
+          LAUNCHER="$OPENCODE_CLI_PATH"
+          LAUNCHER_DIR=$(dirname "$(readlink -f "$LAUNCHER")")
+          echo "Launcher: $LAUNCHER ($(file -b "$LAUNCHER" | head -c80))"
+          echo "Launcher dir: $LAUNCHER_DIR"
+          echo "Platform binaries:"
+          find "$LAUNCHER_DIR" -path "*/opencode-linux-*/bin/opencode" -type f 2>/dev/null | while read -r bin; do
+            echo "  $bin ($(file -b "$bin" | head -c60))"
+          done
+          # Also check node_modules siblings
+          NPM_GLOBAL=$(npm root -g 2>/dev/null)
+          echo "npm global root: $NPM_GLOBAL"
+          find "$NPM_GLOBAL/opencode-ai" -name "opencode" -path "*/bin/*" -type f 2>/dev/null | while read -r bin; do
+            echo "  $bin ($(file -b "$bin" | head -c60))"
+          done
 
-          echo "--- L0a: full env (expect HUNG) ---"
-          timeout 5 $OPENCODE_CLI_PATH --version || echo "L0a HUNG"
-
-          echo "--- L0b: clean env (expect OK) ---"
-          timeout 5 env -i PATH="$PATH" HOME="$HOME" $OPENCODE_CLI_PATH --version || echo "L0b HUNG"
-
-          echo "--- L0c: clean + OPENCODE_DISABLE_AUTOUPDATE only ---"
-          timeout 5 env -i PATH="$PATH" HOME="$HOME" OPENCODE_DISABLE_AUTOUPDATE=true $OPENCODE_CLI_PATH --version || echo "L0c HUNG"
-
-          echo "--- L0d: clean + OPENCODE_BIN_PATH only ---"
-          timeout 5 env -i PATH="$PATH" HOME="$HOME" OPENCODE_BIN_PATH="$OPENCODE_CLI_PATH" $OPENCODE_CLI_PATH --version || echo "L0d HUNG"
-
-          echo "--- L0e: clean + both OPENCODE_ vars ---"
-          timeout 5 env -i PATH="$PATH" HOME="$HOME" OPENCODE_DISABLE_AUTOUPDATE=true OPENCODE_BIN_PATH="$OPENCODE_CLI_PATH" $OPENCODE_CLI_PATH --version || echo "L0e HUNG"
-
-          echo "--- L0f: full env minus OPENCODE_ vars ---"
-          timeout 5 env -u OPENCODE_DISABLE_AUTOUPDATE -u OPENCODE_BIN_PATH $OPENCODE_CLI_PATH --version || echo "L0f HUNG"
-
-          echo "--- L0g: full env minus all OPENCODE_ + GITHUB_ + RUNNER_ ---"
-          timeout 5 env -i PATH="$PATH" HOME="$HOME" CI="${CI:-}" LANG="${LANG:-}" TERM="${TERM:-}" XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-}" $OPENCODE_CLI_PATH --version || echo "L0g HUNG"
+          echo "--- L0: opencode --version (regression check) ---"
+          timeout 5 $OPENCODE_CLI_PATH --version || echo "L0 HUNG (OPENCODE_BIN_PATH still leaking?)"
 
           echo "--- Layer 1: script captures basic echo ---"
           script -q -e --flush -c 'echo hello-from-pty' /tmp/t1.log

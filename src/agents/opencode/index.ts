@@ -109,51 +109,15 @@ export class OpenCodeAgent extends BaseAgent {
         await runCommand(`echo '${b64}' | base64 -d > .prompt.md`);
 
         try {
-            // 5. Invoke opencode with process-level timeout protection.
-            //    evalRunner's withTimeout is promise-level only — it rejects the
-            //    JS promise but cannot kill the spawned child process, leaving
-            //    orphaned opencode/Ollama processes that block CI job cleanup.
-            //    OPENCODE_BIN_PATH is read by opencode's launcher to skip platform
-            //    detection — on Windows ARM64 it points to the Bun .exe directly.
-            //    On CI, this env var is NOT set (it would cause infinite recursion
-            //    if pointed at the launcher), so we fall back to bare 'opencode'
-            //    which is on PATH after npm install -g.
-            //    Inside Docker, opencode is installed in-container and on PATH.
-            const opencodeBinRaw = (!inDocker && process.env.OPENCODE_BIN_PATH) || 'opencode';
-            // Convert Windows backslashes to forward slashes — Git Bash
-            // interprets backslashes as escape sequences in command strings.
-            const opencodeBin = opencodeBinRaw.replace(/\\/g, '/');
-
-            // Pre-flight: verify config injection and binary reachability before
-            // entering the script PTY wrapper, where diagnosis is harder.
-            const configCheck = await runCommand('cat opencode.json 2>/dev/null | head -5 || echo "[WARN] opencode.json missing"');
-            console.log('[OpenCodeAgent] opencode.json (head):', configCheck.stdout.slice(0, 300).trim());
-
-            const versionCheck = await runCommand(`unset NODE_OPTIONS; timeout 10 ${opencodeBin} --version 2>&1 || echo "[WARN] --version failed/timed-out"`);
-            console.log('[OpenCodeAgent] --version:', versionCheck.stdout.slice(0, 100).trim());
-
-            const fullCmd = `${opencodeBin} run "$(cat .prompt.md)"`;
-
-            console.log('[OpenCodeAgent] Running:', fullCmd.slice(0, 250));
-            const result = await runCommand(fullCmd);
-
-            const exitCode = result.exitCode;
-            // exit 124 = timeout sent SIGTERM; exit 137 = SIGKILL (--kill-after).
-            const killedByTimeout = exitCode === 124 || exitCode === 137;
-
+            // 5. Invoke opencode run.
+            //    OPENCODE_BIN_PATH (if set) tells the launcher to use a specific
+            //    binary — on Windows ARM64 this points to the Bun .exe directly.
+            //    On CI it is NOT set (pointing at the launcher causes infinite
+            //    recursion), so the launcher resolves the platform binary itself.
+            const opencodeBin = ((!inDocker && process.env.OPENCODE_BIN_PATH) || 'opencode')
+                .replace(/\\/g, '/');
+            const result = await runCommand(`${opencodeBin} run "$(cat .prompt.md)"`);
             const output = result.stdout + (result.stderr ? '\n' + result.stderr : '');
-
-            console.log(
-                '[OpenCodeAgent] exit:', exitCode,
-                killedByTimeout ? '(killed by timeout)' : '',
-                'output:', output.length, 'bytes',
-            );
-
-            if (exitCode !== 0) {
-                // Log tail in all failure cases including timeout -- helps diagnose
-                // what opencode was doing during the 240s window.
-                console.error('[OpenCodeAgent] output (tail):', output.slice(-1000));
-            }
 
             return output;
         } finally {

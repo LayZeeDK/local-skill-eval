@@ -78,6 +78,10 @@ jobs:
         uses: ./.github/actions/setup-opencode
       - name: PTY smoke test
         run: |
+          echo "--- Layer 0: bare opencode --version (same as setup-opencode) ---"
+          timeout 10 $OPENCODE_BIN_PATH --version || echo "L0 HUNG"
+          echo "L0 exit=$?"
+
           echo "--- Layer 1: script captures basic echo ---"
           script -q -e --flush -c 'echo hello-from-pty' /tmp/t1.log
           echo "L1 bytes=$(wc -c < /tmp/t1.log)"

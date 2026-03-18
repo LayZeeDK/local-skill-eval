@@ -1,253 +1,251 @@
 # Codebase Structure
 
-**Analysis Date:** 2026-03-08
+**Analysis Date:** 2026-03-10
 
 ## Directory Layout
 
 ```
-/d/projects/github/LayZeeDK/local-skill-eval/
-├── src/                    # Main source code (TypeScript)
-│   ├── cli.ts              # Entry point: argument parsing, environment loading, task orchestration
-│   ├── types.ts            # Core interfaces and abstract classes
-│   ├── evalRunner.ts       # Trial execution orchestrator, reward calculation, report serialization
-│   ├── agents/             # LLM agent implementations
-│   │   ├── gemini.ts       # Gemini CLI wrapper
-│   │   └── claude.ts       # Claude CLI wrapper
-│   ├── providers/          # Environment isolation implementations
-│   │   ├── docker.ts       # Docker-based execution (image build, container management)
-│   │   └── local.ts        # Local filesystem-based execution (temp directory)
-│   ├── graders/            # Evaluation logic
-│   │   └── index.ts        # DeterministicGrader and LLMGrader implementations
-│   ├── reporters/          # Result visualization
-│   │   ├── cli.ts          # Terminal UI with ANSI colors and bars
-│   │   └── browser.ts      # Web server serving JSON-based dashboard
-│   ├── analytics/          # Statistics and aggregation
-│   │   ├── analyze.ts      # CLI script for post-evaluation analytics
-│   │   └── engine.ts       # AnalyticsEngine: normalized gain calculation
-│   ├── preview.ts          # Router: selects CLI or browser preview
-│   └── viewer.ts           # Unused viewer entry point
-│
-├── tasks/                  # Task definitions (user-provided)
+local-skill-eval/
+├── src/                    # All TypeScript source code
+│   ├── cli.ts              # Main entry point — eval runner CLI
+│   ├── evalRunner.ts       # Core orchestration: EvalRunner class
+│   ├── types.ts            # Shared interfaces and abstract classes
+│   ├── preview.ts          # Preview entry point (routes CLI vs browser)
+│   ├── viewer.ts           # Standalone browser viewer (legacy; see reporters/browser.ts)
+│   ├── viewer.html         # Single-file browser UI served by browser reporter
+│   ├── agents/             # Agent harness implementations
+│   │   ├── claude.ts       # ClaudeAgent — wraps `claude` CLI
+│   │   └── gemini.ts       # GeminiAgent — wraps `gemini` CLI
+│   ├── graders/            # Grader implementations
+│   │   └── index.ts        # DeterministicGrader, LLMGrader, getGrader factory
+│   ├── providers/          # Environment provider implementations
+│   │   ├── docker.ts       # DockerProvider — containerized isolation
+│   │   └── local.ts        # LocalProvider — temp dir on host
+│   ├── reporters/          # Output formatters
+│   │   ├── cli.ts          # ANSI terminal report
+│   │   └── browser.ts      # HTTP server + viewer.html
+│   └── analytics/          # Post-run analysis
+│       ├── analyze.ts      # Analytics CLI entry point
+│       └── engine.ts       # AnalyticsEngine + calculateNormalizedGain
+├── tasks/                  # Eval task definitions (one dir per task)
 │   └── superlint_demo/     # Example task
-│       ├── task.toml       # Task config: metadata, graders, resource limits
-│       ├── instruction.md  # Agent prompt (task description)
-│       ├── .env            # Optional task-level environment variables
-│       ├── environment/
-│       │   └── Dockerfile  # Container image setup for execution
-│       ├── solution/
-│       │   └── solve.sh    # Reference solution (for --validate)
-│       ├── tests/
-│       │   └── test.sh     # Deterministic grader script
-│       ├── prompts/
-│       │   └── quality.md  # LLM rubric for evaluation
-│       ├── skills/
-│       │   └── superlint/  # Co-located skill auto-discovered by agents
+│       ├── task.toml       # Task config: graders, timeouts, resource limits
+│       ├── instruction.md  # Agent prompt
+│       ├── app.js          # Task workspace file(s)
+│       ├── environment/    # Container setup
+│       │   └── Dockerfile  # Task Docker image
+│       ├── solution/       # Reference solution for --validate
+│       │   └── solve.sh
+│       ├── tests/          # Deterministic grader scripts
+│       │   └── test.sh
+│       ├── prompts/        # LLM rubric files
+│       │   └── quality.md
+│       ├── skills/         # Co-located skills (auto-injected)
+│       │   └── superlint/
 │       │       └── SKILL.md
-│       ├── bin/            # Task-specific binaries (e.g., superlint CLI)
-│       │   └── superlint
-│       ├── app.js          # Task-specific source files
-│       └── [other task files]
-│
-├── suites/                 # Task suite definitions (groups of tasks)
-│   └── [suite].toml        # TOML file listing tasks to run as a suite
-│
-├── tests/                  # Test suite (TypeScript)
-│   ├── bootstrap.test.ts   # Infrastructure verification (Docker/Local without API keys)
-│   └── analytics.test.ts   # Analytics engine testing
-│
-├── results/                # Generated evaluation reports (JSON)
-│   └── [task]_[timestamp].json  # EvalReport files
-│
-├── assets/                 # Static assets
-│   └── cli-preview.png     # Screenshot for README
-│
-├── .planning/              # GSD planning artifacts
-│
-├── package.json            # Node.js dependencies and scripts
-├── tsconfig.json           # TypeScript compiler config
-├── .node-version           # Node.js version (24+)
-└── README.md               # Project documentation
+│       └── bin/            # Task-specific CLI tools available on PATH
+├── suites/                 # Task groupings for batch runs
+│   └── workflow.toml       # Defines a named list of task names
+├── tests/                  # Integration and unit test scripts
+│   ├── bootstrap.test.ts   # End-to-end: full eval pipeline (local + docker)
+│   ├── analytics.test.ts   # Analytics engine unit tests
+│   ├── ollama-grader.test.ts  # LLMGrader with mocked fetch
+│   ├── docker-cache.test.ts   # Docker image cache behavior
+│   ├── local-provider.test.ts # LocalProvider unit tests
+│   ├── benchmark-grader.ts    # Grader accuracy/latency benchmark
+│   └── fixtures/           # Static test fixtures
+│       └── benchmark/
+│           ├── session-empty.json
+│           ├── session-positive.json
+│           └── session-wrong.json
+├── results/                # Eval report output (JSON, gitignored)
+│   └── <task>_<timestamp>.json
+├── scripts/                # Development/CI helper scripts
+│   └── ollama-bench.sh     # Shell benchmark for Ollama performance tuning
+├── research/               # Exploratory research artifacts
+│   └── skill-creator/
+├── assets/                 # Static assets (images for README)
+│   └── cli-preview.png
+├── dist/                   # TypeScript compilation output (gitignored)
+├── .planning/              # GSD project planning documents
+├── .github/                # CI/CD workflows and reusable actions
+│   ├── workflows/
+│   └── actions/
+│       ├── setup-node/
+│       └── setup-ollama/
+├── package.json            # npm manifest, scripts, dependencies
+├── tsconfig.json           # TypeScript compiler config (target ES2024, CommonJS)
+├── .node-version           # Node.js version pin (for FNM/nvm)
+└── README.md
 ```
 
 ## Directory Purposes
 
 **`src/`:**
-- Purpose: All executable TypeScript source code
-- Contains: CLI, eval engine, agents, providers, graders, reporters, types
-- Key files: `cli.ts` (entry), `types.ts` (contracts), `evalRunner.ts` (orchestrator)
+- Purpose: All TypeScript application code
+- Contains: Entry points, orchestration, plugins (agents/providers/graders), reporters, analytics
+- Key files: `src/cli.ts` (main entry), `src/evalRunner.ts` (orchestrator), `src/types.ts` (data model)
 
 **`src/agents/`:**
-- Purpose: Agent implementations wrapping external LLM CLIs
-- Contains: Gemini and Claude agent classes
-- Pattern: Each extends BaseAgent, encodes instruction to base64, invokes CLI via runCommand
+- Purpose: One file per supported AI agent CLI
+- Contains: Classes extending `BaseAgent`; each wraps a specific CLI tool (gemini, claude)
+- Key files: `src/agents/gemini.ts`, `src/agents/claude.ts`
 
 **`src/providers/`:**
-- Purpose: Execution environment isolation strategies
-- Contains: Docker and local providers
-- Pattern: Each implements EnvironmentProvider interface with prepare, setup, cleanup, teardown, runCommand
+- Purpose: Environment isolation strategies
+- Contains: Classes implementing `EnvironmentProvider`; one for Docker, one for local process
+- Key files: `src/providers/docker.ts`, `src/providers/local.ts`
 
 **`src/graders/`:**
-- Purpose: Trial evaluation and scoring logic
-- Contains: DeterministicGrader (shell script exit code or float reward file), LLMGrader (Gemini/Anthropic API)
-- Pattern: Both implement Grader interface, return GraderResult with score (0.0–1.0)
+- Purpose: Task scoring implementations
+- Contains: `Grader` interface, `DeterministicGrader`, `LLMGrader`, `getGrader` factory
+- Key files: `src/graders/index.ts` (single file — all graders in one module)
 
 **`src/reporters/`:**
-- Purpose: Visualize evaluation results
-- Contains: CLI renderer (ANSI tables/progress bars), browser UI
-- Pattern: Load JSON reports, render with formatting/styling
+- Purpose: Human-readable output of eval results
+- Contains: CLI ANSI formatter, HTTP server for browser UI
+- Key files: `src/reporters/cli.ts`, `src/reporters/browser.ts`
 
 **`src/analytics/`:**
-- Purpose: Post-evaluation aggregation and metrics
-- Contains: Report loader, analytics engine (normalized gain calculation)
-- Pattern: Load all reports from results/, group by task, compute statistics
+- Purpose: Cross-run statistical analysis
+- Contains: `AnalyticsEngine` class, `calculateNormalizedGain` function
+- Key files: `src/analytics/engine.ts`, `src/analytics/analyze.ts`
 
 **`tasks/`:**
-- Purpose: User-provided task definitions
-- Contains: One subdirectory per task (e.g., `superlint_demo`)
-- Pattern: Each task has task.toml (config), instruction.md (prompt), graders (tests/ and prompts/), skills/
+- Purpose: Self-contained task definitions — each task is a directory with `task.toml`, `instruction.md`, grader scripts, a Dockerfile, and optional skills
+- Contains: One subdirectory per eval task
+- Key files: `tasks/<name>/task.toml`, `tasks/<name>/instruction.md`, `tasks/<name>/environment/Dockerfile`
 
 **`suites/`:**
-- Purpose: Define groups of tasks to run together
-- Contains: TOML files (e.g., `workflow.toml`)
-- Pattern: Each file lists task names under a `[tasks]` array
+- Purpose: Named collections of tasks for batch evaluation
+- Contains: TOML files listing task names
+- Key files: `suites/workflow.toml`
 
 **`tests/`:**
-- Purpose: TypeScript test suite for infrastructure verification
-- Contains: Bootstrap test (no API key required), analytics test
-- Pattern: Run with `npm run test:bootstrap` and `npm run test:analytics`
+- Purpose: Integration and unit tests; run with `ts-node` directly (no test framework)
+- Contains: `*.test.ts` files and `benchmark-grader.ts`, plus fixture JSON files
+- Key files: `tests/bootstrap.test.ts` (full pipeline smoke test), `tests/ollama-grader.test.ts` (LLM grader unit tests)
+
+**`tests/fixtures/benchmark/`:**
+- Purpose: Static session log JSON files used by grader benchmark and unit tests
+- Generated: No — manually authored
+- Committed: Yes
 
 **`results/`:**
-- Purpose: Persisted evaluation reports
-- Contains: JSON files named `[task]_[ISO-timestamp].json`
-- Pattern: Auto-created by EvalRunner.saveReport(), loaded by preview and analytics
+- Purpose: Output directory for eval reports — one JSON file per eval run
+- Generated: Yes — written by `EvalRunner.saveReport()`
+- Committed: No (gitignored)
+
+**`scripts/`:**
+- Purpose: Developer utilities not part of the application
+- Contains: Shell scripts for benchmarking and tooling
+- Key files: `scripts/ollama-bench.sh`
+
+**`dist/`:**
+- Purpose: TypeScript compilation output
+- Generated: Yes — `tsc` writes here
+- Committed: No (gitignored)
 
 ## Key File Locations
 
 **Entry Points:**
-- `src/cli.ts`: Main CLI (`npm run eval`)
-- `tests/bootstrap.test.ts`: Infrastructure test (`npm run test:bootstrap`)
-- `src/analytics/analyze.ts`: Analytics script (`npm run analyze`)
-- `src/preview.ts`: Result viewer router (`npm run preview` or `npm run viewer`)
+- `src/cli.ts`: Main eval CLI — invoked by `npm run eval`
+- `src/preview.ts`: Results viewer router — invoked by `npm run preview`
+- `src/analytics/analyze.ts`: Analytics CLI — invoked by `npm run analyze`
 
 **Configuration:**
-- `package.json`: Node.js dependencies and npm scripts
-- `tsconfig.json`: TypeScript compiler options (target: ES2024, strict mode)
-- `.node-version`: Node.js 24+ requirement
-- `.gitignore`: Standard Node.js/TypeScript exclusions
+- `tasks/<name>/task.toml`: Per-task configuration — grader types, weights, timeouts, resource limits
+- `suites/<name>.toml`: Suite configuration — list of task names
+- `tsconfig.json`: TypeScript compiler settings
+- `package.json`: npm scripts and dependencies
+- `.node-version`: Node.js version requirement (24+)
 
 **Core Logic:**
-- `src/types.ts`: All interface and abstract class definitions
-- `src/evalRunner.ts`: Trial execution, reward calculation, metrics aggregation
-- `src/graders/index.ts`: Deterministic and LLM grading logic
-
-**Task Definition Pattern:**
-- `tasks/[name]/task.toml`: Task metadata and grader config
-- `tasks/[name]/instruction.md`: Agent instruction (prompt)
-- `tasks/[name]/environment/Dockerfile`: Execution environment
-- `tasks/[name]/solution/solve.sh`: Reference solution
-- `tasks/[name]/tests/test.sh`: Deterministic grader script
-- `tasks/[name]/prompts/quality.md`: LLM rubric
-- `tasks/[name]/skills/[skill-name]/SKILL.md`: Auto-discovered skill
+- `src/evalRunner.ts`: Trial execution, grader dispatch, metric calculation, report persistence
+- `src/types.ts`: All shared interfaces and abstract classes
+- `src/graders/index.ts`: All grader logic including Ollama/Gemini/Anthropic LLM calls
 
 **Testing:**
-- `tasks/superlint_demo/`: Example task used by bootstrap test
-- `tests/bootstrap.test.ts`: Exercises both Docker and Local providers
+- `tests/bootstrap.test.ts`: Full pipeline end-to-end test (no external AI needed)
+- `tests/ollama-grader.test.ts`: LLM grader unit tests with mocked HTTP
+- `tests/fixtures/benchmark/*.json`: Static session fixtures for grader accuracy tests
 
 ## Naming Conventions
 
 **Files:**
-- TypeScript source: `camelCase.ts` (e.g., `evalRunner.ts`, `cli.ts`)
-- TOML config: `lowercase.toml` (e.g., `task.toml`, `workflow.toml`)
-- Markdown docs: `UPPERCASE.md` in task dirs (e.g., `instruction.md`, `SKILL.md`)
-- Generated reports: `[task]_[timestamp].json` (e.g., `superlint_demo_2026-03-08T14-30-45-123Z.json`)
+- `camelCase.ts` for source modules (e.g., `evalRunner.ts`, `docker.ts`)
+- `kebab-case.test.ts` is not used; files are named `<feature>.test.ts` in flat `tests/` dir
+- Task directories use `snake_case` (e.g., `superlint_demo`)
+- Suite files use `snake_case.toml` (e.g., `workflow.toml`)
+- Result files: `<taskName>_<ISO-timestamp>.json` (e.g., `superlint_demo_2026-03-08T13-30-48-941Z.json`)
 
-**Directories:**
-- Source: `lowercase/` (e.g., `src/`, `agents/`, `providers/`)
-- Task names: `snake_case/` (e.g., `superlint_demo`)
-- Generated: `lowercase/` (e.g., `results/`)
+**Classes:**
+- PascalCase for classes (e.g., `EvalRunner`, `DockerProvider`, `LLMGrader`, `GeminiAgent`)
+- Suffix conventions: `Provider` for environment providers, `Agent` for agent harnesses, `Grader` for graders, `Reporter` is not used (files are named by output mode: `cli.ts`, `browser.ts`)
 
-**Classes & Interfaces:**
-- Interface: `PascalCase` with I-prefix optional (e.g., `BaseAgent`, `EnvironmentProvider`, `TaskConfig`)
-- Class: `PascalCase` with suffix for purpose (e.g., `DeterministicGrader`, `LocalProvider`, `EvalRunner`)
-- Abstract class: `BaseXxx` pattern (e.g., `BaseAgent`)
+**Interfaces:**
+- PascalCase prefixed by role (e.g., `EnvironmentProvider`, `GraderConfig`, `TaskConfig`, `TrialResult`)
+- No `I` prefix convention
 
-**Functions & Methods:**
-- camelCase (e.g., `runEval()`, `loadTaskConfig()`, `estimateTokens()`)
-- Helpers: camelCase with underscore prefix if private-scoped (e.g., `withTimeout()`)
+**Functions:**
+- `camelCase` for exported functions (e.g., `loadTaskConfig`, `getGrader`, `calculatePassAtK`, `calculateNormalizedGain`)
+- `camelCase` for private methods (e.g., `runSingleTrial`, `saveReport`, `sanitize`)
 
 ## Where to Add New Code
 
-**New Agent (e.g., LocalLLMAgent):**
-- Primary code: `src/agents/new-agent.ts` (extends BaseAgent, implements run())
-- Pattern: Encode instruction to file, invoke CLI, return stdout + stderr
-- Register: Add to CLI agent type selection in `src/cli.ts` (line 59)
+**New Agent (e.g., OpenAI CLI harness):**
+- Implementation: `src/agents/<agentname>.ts` — extend `BaseAgent`
+- Wire up: add to agent selection in `src/cli.ts`
 
-**New Provider (e.g., KubernetesProvider):**
-- Primary code: `src/providers/kubernetes.ts` (implements EnvironmentProvider)
-- Pattern: Implement all methods (prepare, setup, cleanup, teardown, runCommand)
-- Register: Add to CLI provider type selection in `src/cli.ts` (line 68)
+**New Environment Provider:**
+- Implementation: `src/providers/<name>.ts` — implement `EnvironmentProvider`
+- Wire up: add to provider selection in `src/cli.ts`
 
-**New Grader Type (e.g., custom_llm_grader):**
-- Primary code: `src/graders/index.ts` (new class implementing Grader)
-- Register: Add case in getGrader() function (line 214)
+**New Grader Type:**
+- Implementation: add class to `src/graders/index.ts` implementing `Grader`
+- Wire up: add case to `getGrader()` switch in `src/graders/index.ts`
+- Reference in task: add `[[graders]]` entry in `task.toml` with the new `type` string
 
 **New Task:**
-- Create: `tasks/[new-task-name]/` directory
-- Add files: `task.toml`, `instruction.md`, `environment/Dockerfile`, `solution/solve.sh`, `tests/test.sh`, `prompts/quality.md`
-- Optional: `skills/[skill-name]/SKILL.md` for agent skill injection
+- Create directory: `tasks/<task_name>/`
+- Required files: `task.toml`, `instruction.md`, `environment/Dockerfile`, `tests/test.sh` (or other grader command), `solution/solve.sh`
+- Optional: `prompts/<rubric>.md` for LLM graders, `skills/<skill>/SKILL.md` for auto-discovered skills, `.env` for task-specific env vars
 
-**New Reporter/Analytics:**
-- Primary code: `src/reporters/new-reporter.ts` or `src/analytics/new-engine.ts`
-- Pattern: Load EvalReport[] from results/ directory, transform and display
-- Entry point: Add to `src/preview.ts` or create new npm script in package.json
+**New Reporter:**
+- Implementation: `src/reporters/<mode>.ts` exporting a `run<Mode>Preview(resultsDir)` function
+- Wire up: add branch in `src/preview.ts`
 
-**Shared Utilities:**
-- Utilities: `src/utils/` directory (if needed; currently utilities are inline)
-- Pattern: Keep utility functions close to usage to avoid over-abstraction
+**New Analytics Metric:**
+- Add computation to `src/analytics/engine.ts` in `AnalyticsEngine.aggregate()` or as a standalone exported function
+- Expose in output in `src/analytics/analyze.ts`
+
+**New Test:**
+- Location: `tests/<feature>.test.ts`
+- Pattern: self-contained script using `ts-node`; call `process.exit(1)` on failure
+- Add `npm run test:<feature>` script to `package.json`
 
 ## Special Directories
 
-**`results/`:**
-- Purpose: Store evaluation reports from trial runs
-- Generated: Yes (auto-created by EvalRunner)
-- Committed: No (in .gitignore)
-- Cleanup: Manual or as part of CI/CD cleanup
-
 **`.planning/`:**
-- Purpose: GSD codebase mapping and plan artifacts
-- Generated: Yes (by /gsd commands)
-- Committed: Yes (tracks planning history)
-
-**`node_modules/`:**
-- Purpose: npm dependencies
-- Generated: Yes (by npm install)
-- Committed: No (in .gitignore)
-
-**`.env`:**
-- Purpose: Root-level environment variables (API keys, secrets)
-- Generated: Manual (user-created)
-- Committed: No (in .gitignore)
-- Loading: Parsed in cli.ts, passed to provider and graders
-
-**`tasks/[name]/.env`:**
-- Purpose: Task-level environment variable overrides
-- Generated: Manual (task author)
+- Purpose: GSD workflow planning documents (phases, milestones, codebase analysis)
+- Generated: Partially (phase docs are generated; codebase docs written by mapping agents)
 - Committed: Yes
-- Loading: Merged with root .env in cli.ts (task .env overrides root)
 
-## Folder Organization Summary
+**`results/`:**
+- Purpose: Eval report output; one timestamped JSON per eval run
+- Generated: Yes — runtime output
+- Committed: No (in `.gitignore`)
 
-| Directory | Type | Committed | Purpose |
-|-----------|------|-----------|---------|
-| `src/` | Source | Yes | All executable TypeScript code |
-| `tasks/` | Config | Yes | User-provided task definitions |
-| `suites/` | Config | Yes | Task groupings |
-| `tests/` | Source | Yes | Test suite |
-| `results/` | Generated | No | Evaluation report JSONs |
-| `node_modules/` | Generated | No | npm dependencies |
-| `assets/` | Static | Yes | Images, documentation assets |
-| `.planning/` | Generated | Yes | GSD planning artifacts |
+**`dist/`:**
+- Purpose: TypeScript compilation output
+- Generated: Yes — `npm run build`
+- Committed: No (in `.gitignore`)
+
+**`tasks/<name>/bin/`:**
+- Purpose: Task-specific CLI executables available on PATH during agent execution; LocalProvider prepends `$(pwd)/bin` to PATH via shell wrapper; Docker image can install these during `Dockerfile` build
+- Generated: No — part of the task definition
+- Committed: Yes
 
 ---
 
-*Structure analysis: 2026-03-08*
+*Structure analysis: 2026-03-10*

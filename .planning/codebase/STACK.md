@@ -1,119 +1,86 @@
 # Technology Stack
 
-**Analysis Date:** 2026-03-08
+**Analysis Date:** 2026-03-10
 
 ## Languages
 
 **Primary:**
-- TypeScript 5.9.3 - All source code and scripts
-- Shell (Bash) - Task environments and reference solutions
+- TypeScript 5.9.x - All source code in `src/` and `tests/`
 
 **Secondary:**
-- JavaScript - CLI execution (Node.js CommonJS modules)
-- TOML - Task configuration files
+- Bash - Task test scripts (`tasks/*/tests/test.sh`), reference solutions (`tasks/*/solution/solve.sh`), and the Ollama benchmark script (`tests/ollama-bench.sh`)
+- HTML/JavaScript - Browser-based results viewer (`src/viewer.html`, compiled from `src/viewer.ts`)
 
 ## Runtime
 
 **Environment:**
-- Node.js 24.0.0 or higher (required)
-  - Location: `/package.json` engines field
-  - Run via: `ts-node` for development, compiled JS for production
-- Docker Desktop - Required for task execution environments
-- Bash shell - Command execution and grading
+- Node.js >=24.0.0 (currently v24.13.0 on dev machine)
 
 **Package Manager:**
-- npm 11+ (ships with Node.js 24)
+- npm 11.6.2
 - Lockfile: `package-lock.json` present
 
 ## Frameworks
 
 **Core:**
-- TypeScript compiler (`typescript@5.9.3`) - Language compilation
-- ts-node (`ts-node@10.9.2`) - Direct TypeScript execution
-- TOML parser (`toml@3.0.0`) - Task configuration parsing
-
-**Container Management:**
-- Docker SDK: `dockerode@4.0.9` - Native Docker API client for task environment orchestration
-- tar-stream (`tar-stream@3.1.7`) - TAR archive creation for Docker skill injection
-
-**Utilities:**
-- fs-extra (`fs-extra@11.3.3`) - File system operations with promise support
+- None — purpose-built CLI tool with no application framework
 
 **Testing:**
-- ts-node (doubles as test runner via `npm run test:bootstrap`, `npm run test:analytics`)
+- No test framework — tests use a custom hand-rolled runner in each `tests/*.test.ts` file (sequential async, `process.exit(1)` on failure). No Jest, Vitest, or Mocha.
 
 **Build/Dev:**
-- No build tool (tsconfig.json configured, ts-node runs code directly)
-- No formatter/linter config detected (no .eslintrc, .prettierrc, biome.json)
+- `ts-node` ^10.9.2 — runs TypeScript directly without a prior compile step (all `npm run *` scripts use `ts-node`)
+- `typescript` ^5.9.3 — compiles to `dist/` via `tsc` for the `npm run build` command
 
 ## Key Dependencies
 
 **Critical:**
-- `dockerode@4.0.9` - Enables Docker provider for isolated task execution; container lifecycle management
-- `fs-extra@11.3.3` - File system operations for task setup, workspace management, report persistence
-- `toml@3.0.0` - Parses task.toml configuration files (grader setup, timeouts, environment limits)
+- `dockerode` ^4.0.9 — Node.js Docker Engine API client; used in `src/providers/docker.ts` for building images, creating/running/removing containers, and executing commands via `exec`
+- `fs-extra` ^11.3.3 — Enhanced `fs` with `pathExists`, `ensureDir`, `copy`, `remove`, `readJSON`, `writeJSON`; used throughout all source files
+- `tar-stream` ^3.1.7 — Stream-based TAR packing for injecting skill directories into Docker containers (`src/providers/docker.ts`)
+- `toml` ^3.0.0 — Parses `task.toml` task configuration files and `suites/*.toml` suite definitions (`src/evalRunner.ts`, `src/cli.ts`)
 
 **Infrastructure:**
-- `tar-stream@3.1.7` - Archives skills directories for injection into Docker containers
-- `@types/*` - TypeScript type definitions for Node.js, Docker, fs-extra, tar-stream
+- `@types/dockerode` ^4.0.1 — TypeScript types for dockerode
+- `@types/fs-extra` ^11.0.4 — TypeScript types for fs-extra
+- `@types/node` ^24.12.0 — Node.js built-in type definitions
+- `@types/tar-stream` ^3.1.3 — TypeScript types for tar-stream
 
 ## Configuration
 
+**TypeScript:**
+- `tsconfig.json` at project root
+- `target: ES2024`, `module: CommonJS`, `moduleResolution: node`
+- `strict: true`, `esModuleInterop: true`
+- Output directory: `./dist`
+- Includes: `src/**/*.ts`, `tests/**/*.ts`
+
+**Package type:**
+- `"type": "commonjs"` — all modules use CommonJS `require`/`module.exports`
+
 **Environment:**
-- `.env` file support (parsed at `src/cli.ts` lines 14–31)
-  - Root `.env` in project root loaded first
-  - Task-level `.env` in `tasks/<task_name>/.env` loaded per-task (overrides root)
-  - Process environment variables override file-based env (GEMINI_API_KEY, ANTHROPIC_API_KEY)
-  - All env values automatically redacted from persisted logs
+- No `.env` file at project root (optional; loaded at runtime if present)
+- Root `.env` loaded by `src/cli.ts` at startup; task-level `.env` at `tasks/<name>/.env` overrides root
+- `GEMINI_API_KEY` and `ANTHROPIC_API_KEY` from process env override `.env` values
+- `OLLAMA_HOST` configures LLM grader endpoint (default: `http://localhost:11434`)
+- Ollama performance vars: `OLLAMA_FLASH_ATTENTION`, `OLLAMA_KV_CACHE_TYPE`, `OLLAMA_NUM_PARALLEL`, `OLLAMA_NUM_THREAD`
 
 **Build:**
-- `tsconfig.json` - Target: ES2024, module: CommonJS, strict: true
-  - Includes `src/**/*.ts` and `tests/**/*.ts`
-  - Output to `./dist/` (though not used in npm scripts)
-
-**Scripts:**
-- `npm run eval` → `ts-node src/cli.ts` - Main evaluation runner
-- `npm run validate` → `ts-node src/cli.ts --validate` - Grader validation against reference solution
-- `npm run analyze` → `ts-node src/analytics/analyze.ts` - Metrics aggregation
-- `npm run preview` → `ts-node src/preview.ts` - CLI results viewer (default)
-- `npm run viewer` → `ts-node src/preview.ts browser` - Web UI results viewer (localhost:3847)
+- `npm run build` → `tsc` compiles to `dist/`
+- All dev/run scripts bypass compile step with `ts-node` directly
 
 ## Platform Requirements
 
 **Development:**
 - Node.js 24+
-- npm 11+ (included with Node.js)
-- Docker Desktop (for most use cases; local provider available as fallback)
-- Bash shell (Linux/macOS/WSL or Git Bash on Windows)
-- Git (for version control)
+- npm
+- Docker (for `--provider=docker`, the default)
+- Git Bash (Windows) or bash (Unix) — `LocalProvider` explicitly resolves Git Bash on Windows via `git --exec-path`
+- Optional: Ollama running locally for free LLM grading
 
 **Production:**
-- Docker (for isolated evaluation environments)
-  - Hosts task environments: agents, skills, test suites
-  - Network accessible (if running remotely)
-- Node.js 24+ runtime
-- Access to task directories (`tasks/*/`) with Dockerfile, instruction.md, graders
-
-**Agent Execution:**
-- Gemini CLI (`@google/gemini-cli`) - Installed via npm or Docker RUN in task environments
-- Claude Code (`claude` command) - Must be installed separately on user's system for local provider
-- Both agents run outside the evaluation framework; the framework invokes them via CLI
-
-## External Services (Optional)
-
-**LLM Grading (optional, for `llm_rubric` grader type):**
-- Google Gemini API (via `generativelanguage.googleapis.com/v1beta/models/`)
-  - Default model: `gemini-2.0-flash`
-  - Auth: `GEMINI_API_KEY` environment variable
-  - Used by: `src/graders/index.ts` `LLMGrader.callGemini()` (lines 145–165)
-  - Communication: Fetch API with POST to `/v1beta/models/{model}:generateContent`
-
-- Anthropic Claude API (via `api.anthropic.com/v1/messages`)
-  - Default model: `claude-sonnet-4-20250514`
-  - Auth: `ANTHROPIC_API_KEY` environment variable
-  - Used by: `src/graders/index.ts` `LLMGrader.callAnthropic()` (lines 167–190)
-  - Communication: Fetch API with POST, includes `x-api-key` and `anthropic-version` headers
+- Not applicable — this is a local developer tool, not a deployed service
 
 ---
 
-*Stack analysis: 2026-03-08*
+*Stack analysis: 2026-03-10*

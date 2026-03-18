@@ -9,41 +9,22 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-
-env:
-  NODE_OPTIONS: '--max-old-space-size=4096'
-
 jobs:
-  eval-local:
-    name: Eval (local)
+  validate-graders:
+    name: Validate Graders
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
+    concurrency:
+      group: ${{ github.workflow }}-validate-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node
       - uses: ./.github/actions/setup-ollama
-      - name: Run evaluation
-        run: npm run validate -- superlint_demo --provider=local
-      - name: Preview results
-        if: always()
-        run: npm run preview
-      - uses: actions/upload-artifact@v4
-        if: always()
         with:
-          name: eval-results-local
-          path: results/
-
-  eval-docker:
-    name: Eval (docker)
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-node
-      - uses: ./.github/actions/setup-ollama
+          models: |
+            - name: qwen2.5:3b
+            - name: qwen3:4b
       - name: Compute Docker cache key
         id: docker-cache
         run: |
@@ -58,7 +39,9 @@ jobs:
       - name: Load cached Docker image
         if: steps.docker-restore.outputs.cache-hit == 'true'
         run: docker load -i /tmp/docker-cache/eval-image.tar
-      - name: Run evaluation
+      - name: Validate (local)
+        run: npm run validate -- superlint_demo --provider=local
+      - name: Validate (docker)
         run: npm run validate -- superlint_demo --provider=docker
       - name: Save Docker image to cache
         if: steps.docker-restore.outputs.cache-hit != 'true'
@@ -74,5 +57,163 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: eval-results-docker
+          name: eval-results-validate
+          path: results/
+
+  # ---------- opencode / local ----------
+  opencode-local:
+    name: Agent Eval (opencode/local)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-node
+      - uses: ./.github/actions/setup-ollama
+        with:
+          models: |
+            - name: qwen3:4b
+              modelfile: modelfiles/qwen3-4b-skill-eval-opencode-agent.ci.Modelfile
+              as: qwen3-4b-skill-eval-opencode-agent
+      - name: Setup OpenCode
+        uses: ./.github/actions/setup-opencode
+      - name: Run agent eval
+        timeout-minutes: 15
+        run: npx tsx src/cli.ts superlint_demo --agent=opencode --provider=local --trials=1
+      - name: Preview results
+        if: always()
+        run: npm run preview
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-results-opencode-local
+          path: results/
+
+  # ---------- opencode / docker ----------
+  opencode-docker:
+    name: Agent Eval (opencode/docker)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-node
+      - uses: ./.github/actions/setup-ollama
+        with:
+          models: |
+            - name: qwen3:4b
+              modelfile: modelfiles/qwen3-4b-skill-eval-opencode-agent.ci.Modelfile
+              as: qwen3-4b-skill-eval-opencode-agent
+      - name: Compute Docker cache key
+        id: docker-cache
+        run: |
+          HASH=$(find tasks/superlint_demo -type f | sort | xargs sha256sum | sha256sum | cut -c1-16)
+          echo "key=docker-eval-superlint-$HASH" >> "$GITHUB_OUTPUT"
+      - name: Restore Docker image cache
+        id: docker-restore
+        uses: actions/cache@v5
+        with:
+          path: /tmp/docker-cache
+          key: ${{ steps.docker-cache.outputs.key }}
+      - name: Load cached Docker image
+        if: steps.docker-restore.outputs.cache-hit == 'true'
+        run: docker load -i /tmp/docker-cache/eval-image.tar
+      - name: Run agent eval
+        timeout-minutes: 15
+        env:
+          NODE_OPTIONS: '--max-old-space-size=256'
+        run: npx tsx src/cli.ts superlint_demo --agent=opencode --provider=docker --trials=1
+      - name: Save Docker image to cache
+        if: steps.docker-restore.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p /tmp/docker-cache
+          IMAGE=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep skill-eval-superlint | head -1)
+          if [ -n "$IMAGE" ]; then
+            docker save -o /tmp/docker-cache/eval-image.tar "$IMAGE"
+          fi
+      - name: Preview results
+        if: always()
+        run: npm run preview
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-results-opencode-docker
+          path: results/
+
+  # ---------- ollama / local ----------
+  ollama-local:
+    name: Agent Eval (ollama/local)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-node
+      - uses: ./.github/actions/setup-ollama
+        with:
+          models: |
+            - name: qwen2.5:3b
+              modelfile: modelfiles/qwen2.5-3b-skill-eval-ollama-agent.ci.Modelfile
+              as: qwen2.5-3b-skill-eval-ollama-agent
+            - name: qwen3:4b
+      - name: Run agent eval
+        timeout-minutes: 15
+        env:
+          NODE_OPTIONS: '--max-old-space-size=256'
+        run: npx tsx src/cli.ts superlint_demo --agent=ollama --provider=local --trials=1
+      - name: Preview results
+        if: always()
+        run: npm run preview
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-results-ollama-local
+          path: results/
+
+  # ---------- ollama / docker ----------
+  ollama-docker:
+    name: Agent Eval (ollama/docker)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-node
+      - uses: ./.github/actions/setup-ollama
+        with:
+          models: |
+            - name: qwen2.5:3b
+              modelfile: modelfiles/qwen2.5-3b-skill-eval-ollama-agent.ci.Modelfile
+              as: qwen2.5-3b-skill-eval-ollama-agent
+            - name: qwen3:4b
+      - name: Compute Docker cache key
+        id: docker-cache
+        run: |
+          HASH=$(find tasks/superlint_demo -type f | sort | xargs sha256sum | sha256sum | cut -c1-16)
+          echo "key=docker-eval-superlint-$HASH" >> "$GITHUB_OUTPUT"
+      - name: Restore Docker image cache
+        id: docker-restore
+        uses: actions/cache@v5
+        with:
+          path: /tmp/docker-cache
+          key: ${{ steps.docker-cache.outputs.key }}
+      - name: Load cached Docker image
+        if: steps.docker-restore.outputs.cache-hit == 'true'
+        run: docker load -i /tmp/docker-cache/eval-image.tar
+      - name: Run agent eval
+        timeout-minutes: 15
+        env:
+          NODE_OPTIONS: '--max-old-space-size=256'
+        run: npx tsx src/cli.ts superlint_demo --agent=ollama --provider=docker --trials=1
+      - name: Save Docker image to cache
+        if: steps.docker-restore.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p /tmp/docker-cache
+          IMAGE=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep skill-eval-superlint | head -1)
+          if [ -n "$IMAGE" ]; then
+            docker save -o /tmp/docker-cache/eval-image.tar "$IMAGE"
+          fi
+      - name: Preview results
+        if: always()
+        run: npm run preview
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-results-ollama-docker
           path: results/

@@ -1,180 +1,139 @@
 # External Integrations
 
-**Analysis Date:** 2026-03-08
+**Analysis Date:** 2026-03-10
 
-## APIs & External Services
+## AI Agents (Evaluated Subjects)
 
-**LLM Grading Providers:**
+**Gemini CLI:**
+- Role: Default agent under evaluation; executed inside Docker or local workspace
+- Invocation: `gemini -y --sandbox=none -p "$(cat /tmp/.prompt.md)"` (run as shell command inside environment)
+- Auth: `GEMINI_API_KEY` env var (passed into execution environment)
+- Implementation: `src/agents/gemini.ts`
+- Note: The CLI binary must be installed inside the Docker image or locally. The `superlint_demo` Dockerfile installs it with `npm install -g @google/gemini-cli`.
 
-- **Google Gemini API** - Evaluates agent session transcripts against rubrics
-  - SDK/Client: Fetch API (native, no external package)
-  - Auth: `GEMINI_API_KEY` environment variable
-  - Endpoint: `https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`
-  - Default model: `gemini-2.0-flash` (configurable via `config.model`)
-  - Usage: `src/graders/index.ts` `LLMGrader.callGemini()` (lines 145–165)
-  - Request: JSON POST with `{"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {}}`
-  - Response: Expects JSON with `candidates[0].content.parts[0].text` containing JSON score object
-  - Fallback: If GEMINI_API_KEY not present, tries Anthropic API
+**Claude Code CLI:**
+- Role: Alternative agent under evaluation; executed inside Docker or local workspace
+- Invocation: `claude "$(cat /tmp/.prompt.md)" --yes --no-auto-update` (run as shell command inside environment)
+- Auth: `ANTHROPIC_API_KEY` env var (passed into execution environment)
+- Implementation: `src/agents/claude.ts`
 
-- **Anthropic Claude API** - Evaluates agent session transcripts against rubrics
-  - SDK/Client: Fetch API (native, no external package)
-  - Auth: `ANTHROPIC_API_KEY` environment variable
-  - Endpoint: `https://api.anthropic.com/v1/messages`
-  - Default model: `claude-sonnet-4-20250514` (configurable via `config.model`)
-  - Usage: `src/graders/index.ts` `LLMGrader.callAnthropic()` (lines 167–190)
-  - Headers: `Content-Type: application/json`, `x-api-key: {key}`, `anthropic-version: 2023-06-01`
-  - Request: JSON POST with `{"model": model, "max_tokens": 256, "messages": [{"role": "user", "content": prompt}]}`
-  - Response: Expects JSON with `content[0].text` containing JSON score object `{"score": float, "reasoning": string}`
+## LLM Grading APIs
 
-**Agent Execution (CLI-based, not API):**
+The `LLMGrader` in `src/graders/index.ts` uses a fallback chain: Ollama (local) → Gemini API (cloud) → Anthropic API (cloud).
 
-- **Gemini CLI** - Runs agent logic in task environments
-  - Command: `gemini -y --sandbox=none -p "$(cat /tmp/.prompt.md)"`
-  - Installation: `npm install -g @google/gemini-cli` (in Docker or locally)
-  - Auth: Via Gemini user credentials or API key (external to skill-eval)
-  - Used in: `src/agents/gemini.ts` (lines 4–21)
-  - Role: Accepts instruction via stdin, returns stdout/stderr output
-  - Not: API-based; invoked as subprocess, output captured
+**Ollama (Local LLM):**
+- Role: Primary LLM grader; no API key required; preferred for free local inference
+- Endpoint: `OLLAMA_HOST` env var (default: `http://localhost:11434`)
+- API calls:
+  - `GET /` — health check (5s timeout)
+  - `GET /api/tags` — model availability check (5s timeout)
+  - `POST /api/generate` — inference request (120s timeout)
+- Default model: `qwen2.5:3b` (configurable per task via `task.toml` `[[graders]]` `model` field)
+- Request format: uses Ollama's JSON Schema `format` field for structured output
+- Configured via: `OLLAMA_FLASH_ATTENTION`, `OLLAMA_KV_CACHE_TYPE`, `OLLAMA_NUM_PARALLEL`, `OLLAMA_NUM_THREAD`
+- Implementation: `src/graders/index.ts` — `callOllama()`, `callOllamaWithRetry()`, `checkOllamaAvailability()`, `warmUp()`
 
-- **Claude Code CLI** - Runs agent logic in task environments
-  - Command: `claude "$(cat /tmp/.prompt.md)" --yes --no-auto-update`
-  - Installation: Must be installed separately by user (not in package.json)
-  - Auth: Via Claude user session or API key (external to skill-eval)
-  - Used in: `src/agents/claude.ts` (lines 4–21)
-  - Role: Accepts instruction via stdin, returns stdout/stderr output
-  - Not: API-based; invoked as subprocess, output captured
+**Google Gemini API (Cloud Fallback):**
+- Role: First cloud fallback when Ollama is unavailable
+- Endpoint: `https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={apiKey}`
+- Auth: `GEMINI_API_KEY` env var (from `.env` or process environment)
+- Default model: `gemini-2.0-flash` (overridable via task config)
+- Called via native `fetch` with JSON body; no SDK dependency
+- Implementation: `src/graders/index.ts` — `callGemini()`
+
+**Anthropic Claude API (Cloud Fallback):**
+- Role: Second cloud fallback when Ollama and Gemini are both unavailable
+- Endpoint: `https://api.anthropic.com/v1/messages`
+- Auth: `ANTHROPIC_API_KEY` env var (from `.env` or process environment)
+- Headers: `x-api-key`, `anthropic-version: 2023-06-01`
+- Default model: `claude-sonnet-4-20250514` (overridable via task config)
+- Called via native `fetch` with JSON body; no SDK dependency
+- Implementation: `src/graders/index.ts` — `callAnthropic()`
+
+## Container Runtime
+
+**Docker Engine:**
+- Role: Provides isolated, reproducible execution environments for each eval trial
+- Client library: `dockerode` ^4.0.9
+- Connection: Default Docker socket (no explicit host/port; uses `new Docker()` with no args)
+- Operations:
+  - `docker.buildImage()` — builds image from `tasks/<name>/environment/Dockerfile`
+  - `docker.createContainer()`, `container.start()` — spins up per-trial containers
+  - `container.exec()` — runs agent commands inside containers
+  - `container.commit()` — snapshots container with injected skills as a new image
+  - `container.kill()`, `container.remove()` — per-trial cleanup
+  - `docker.getImage().inspect()` — checks cache before rebuilding
+- Image naming: content-hash-based (`skill-eval-<taskname>-<sha256[:8]>[-ready]`) for automatic cache invalidation
+- Resource limits: `NanoCpus` and `Memory` from `task.toml` `[environment]` section
+- Implementation: `src/providers/docker.ts`
 
 ## Data Storage
 
 **Databases:**
-- None. Framework is stateless — no database connection.
+- None — no database used
 
 **File Storage:**
 - Local filesystem only
-  - Results saved to: `results/` directory (configurable via EvalRunner constructor)
-  - Report format: JSON files named `{task}_{ISO-timestamp}.json`
-  - Created by: `src/evalRunner.ts` `saveReport()` (lines 332–342)
-  - Sanitized: API keys redacted via `sanitize()` (lines 299–330)
+- Results written as JSON to `results/` directory (configurable via CLI): `results/<taskname>_<ISO-timestamp>.json`
+- Session logs contain full trial transcripts; secrets are redacted before write
+- Analytics reads from the same `results/` directory
 
 **Caching:**
-- Docker image caching (implicit)
-  - One-time image build per task via `docker.buildImage()` (provider.prepare)
-  - Reused for all trials (provider.setup creates containers from image)
-  - Discarded after eval via `docker.getImage().remove()` (provider.teardown)
-- No explicit cache invalidation; image names include timestamp to prevent collisions
+- Docker image layer cache — built images are reused across runs using content-hash-based names
+- No application-level caching
 
 ## Authentication & Identity
 
 **Auth Provider:**
-- Custom / Environment-based
-  - Gemini API: `GEMINI_API_KEY` environment variable (loaded from `.env` or process env)
-  - Anthropic API: `ANTHROPIC_API_KEY` environment variable (loaded from `.env` or process env)
-  - No OAuth, API gateways, or external identity service
-  - Implementation: Simple fetch requests with key in URL query (Gemini) or header (Anthropic)
-
-**Security Model:**
-- API keys passed via environment variables (typical CLI pattern)
-- All keys **automatically redacted** from persisted session logs before saving
-- No in-memory secret management beyond process.env
-- Docker containers inherit env vars via `Env: [...]` in container config (`src/providers/docker.ts` line 104)
-- Local provider inherits via Node.js child_process `env` merge (`src/providers/local.ts` line 42)
+- None — no user authentication
+- API keys are read from `.env` files or process environment variables at runtime and forwarded into execution environments
 
 ## Monitoring & Observability
 
 **Error Tracking:**
-- None. Errors logged to console.error() and captured in session log
+- None — errors print to stderr and optionally write to `results/` JSON logs
 
 **Logs:**
-- **Session logs** (per-trial, JSON, persisted)
-  - Location: `results/{task}_{timestamp}.json`
-  - Contents: Instruction, commands executed with output, agent result, grader results, reward, errors
-  - Redaction: API keys stripped before persistence
-  - Created by: `src/evalRunner.ts` `saveReport()` (lines 332–342)
-
-- **Console output** (per-trial, stdout)
-  - Trial progress: `Trial N/M ▸ {status} reward={score} ({duration}s, {commands} cmds, {tokens} tokens)`
-  - LLM grader reasoning: `Trial N [llm_rubric] score={score}: {reasoning}`
-  - Summary statistics: Pass rate, pass@k, pass^k, avg duration, total tokens
-
-- **Diagnostic output** (Docker only, on failure)
-  - Captured by: `src/providers/docker.ts` `diagnose()` (lines 210–243)
-  - Contents: Process listing, open file descriptors, network connections, memory, disk usage
-  - Logged: Only when trial fails; helps debug container issues
+- Structured session logs: JSON files in `results/`, one per eval run
+- Console output: `console.log`/`console.warn`/`console.error` only; no log aggregation service
 
 ## CI/CD & Deployment
 
 **Hosting:**
-- None. Framework is CLI-based, runs on developer machines or CI runners.
+- Local developer tool only — not deployed
 
 **CI Pipeline:**
-- None configured
-- Could be integrated into CI/CD via `npm run eval` + log parsing
-- Typical pattern: Run evals in GitHub Actions / GitLab CI with Docker support
-
-**Execution Model:**
-- Local execution via ts-node or compiled Node.js
-- Docker containers orchestrated via `dockerode` for isolated environments
-- Can run locally with `--provider=local` (spawns CLI commands in temp directories)
+- None detected — no `.github/`, `.gitlab-ci.yml`, or similar CI config files present in the repository
 
 ## Environment Configuration
 
-**Required env vars:**
-- `GEMINI_API_KEY` - For Gemini API grading or if agent is Gemini CLI
-- `ANTHROPIC_API_KEY` - For Anthropic API grading or if agent is Claude Code
-- (One or both, depending on grader/agent configuration)
+**Required env vars for eval:**
+- `GEMINI_API_KEY` — required when using Gemini as the evaluated agent
+- `ANTHROPIC_API_KEY` — required when using Claude as the evaluated agent
 
-**Optional env vars:**
-- `DEBUG` - Not explicitly used in framework; available for task-level debugging
-- Task-specific variables - Defined in `tasks/<name>/.env`
+**Required env vars for LLM grading:**
+- At least one of: Ollama running locally, `GEMINI_API_KEY`, or `ANTHROPIC_API_KEY`
+- `OLLAMA_HOST` — optional; defaults to `http://localhost:11434`
+
+**Optional performance vars (Ollama only):**
+- `OLLAMA_FLASH_ATTENTION=1`
+- `OLLAMA_KV_CACHE_TYPE=q8_0`
+- `OLLAMA_NUM_PARALLEL=1`
+- `OLLAMA_NUM_THREAD=<cpu-count>`
 
 **Secrets location:**
-- Project root `.env` file (git-ignored, user-created)
-- Task-level `.env` files in `tasks/<name>/.env` (git-ignored per task)
-- Process environment (shell variables override file-based)
-- Loading order: Root `.env` → Task `.env` → Process env (later overrides earlier)
-
-**Configuration files:**
-- `task.toml` - Per-task configuration (graders, timeouts, resource limits)
-  - Parsed by: `src/evalRunner.ts` `loadTaskConfig()` (lines 10–25)
-  - Schema: `[metadata]`, `[agent]`, `[environment]`, `[[graders]]` sections
+- Root `.env` at project root (not committed; not present by default)
+- Task-level `.env` at `tasks/<name>/.env` (optional, task-specific)
+- All env values are redacted from persisted session logs by `EvalRunner.sanitize()` in `src/evalRunner.ts`
 
 ## Webhooks & Callbacks
 
 **Incoming:**
-- None. Framework is poll-based / sequential.
+- None
 
 **Outgoing:**
-- None. No external service callbacks.
-
-**Event Model:**
-- Agent execution as subprocess (Gemini CLI, Claude Code) with stdout/stderr capture
-- LLM grader as synchronous fetch request (blocks until response)
-- No async webhooks or queues
-
-## Data Flow
-
-**Evaluation Pipeline:**
-
-1. **Setup Phase** - Provider creates workspace
-   - Docker: `provider.prepare()` builds image, optionally injects skills, commits snapshot
-   - Local: `provider.setup()` copies task to temp dir, copies skills to discovery paths
-
-2. **Agent Execution** - LLM agent runs instruction
-   - Instruction read from `{taskPath}/instruction.md`
-   - Passed to agent CLI (Gemini or Claude) via temp file
-   - Agent subprocess runs commands via `provider.runCommand()`
-   - All commands and output logged to session log
-
-3. **Grading Phase** - One or more graders score the result
-   - Deterministic: Runs shell command, reads exit code or `logs/verifier/reward.txt`
-   - LLM: Builds transcript (instruction + commands + agent output + prior graders), calls Gemini or Anthropic API
-   - Scores 0.0–1.0 per grader; weighted by `config.weight`
-   - Final reward = sum(score * weight) / sum(weight)
-
-4. **Teardown Phase** - Cleanup and persistence
-   - Provider cleanup: Remove container (Docker) or temp directory (local)
-   - Report persistence: Session log sanitized (secrets redacted), saved to `results/{task}_{timestamp}.json`
+- None — all external calls are outbound HTTP via native `fetch` to Ollama, Gemini, and Anthropic APIs
 
 ---
 
-*Integration audit: 2026-03-08*
+*Integration audit: 2026-03-10*

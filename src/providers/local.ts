@@ -98,14 +98,21 @@ export class LocalProvider implements EnvironmentProvider {
 
     async runCommand(workspacePath: string, command: string, env?: Record<string, string>): Promise<CommandResult> {
         return new Promise((resolve) => {
-            // Build env: pass all process env + caller overrides (except PATH).
-            // PATH is prepended inside the shell after login profile has run,
-            // so the login profile cannot push workspace bin/ down the PATH.
             const baseEnv = { ...process.env };
 
-            for (const key of Object.keys(baseEnv)) {
-                if (key.toLowerCase() === 'path') {
-                    delete baseEnv[key];
+            // On Windows, strip PATH so bash --login reconstructs it from the
+            // MSYS2 login profile (which converts Windows PATH entries and adds
+            // /usr/bin, FNM shims, etc.).  On Linux, process.env.PATH already
+            // contains everything the CI runner / user shell set up — stripping
+            // it loses GitHub Actions tool directories (fnm node, npm global
+            // bins, ollama) that /etc/profile does not restore.
+            const useLoginShell = process.platform === 'win32';
+
+            if (useLoginShell) {
+                for (const key of Object.keys(baseEnv)) {
+                    if (key.toLowerCase() === 'path') {
+                        delete baseEnv[key];
+                    }
                 }
             }
 
@@ -114,16 +121,17 @@ export class LocalProvider implements EnvironmentProvider {
                 ...env,
             };
 
-            const bashPath = process.platform === 'win32' ? resolveGitBash() : 'bash';
+            const bashPath = useLoginShell ? resolveGitBash() : 'bash';
 
-            // Use --login so the full user environment is available (MSYS2 /usr/bin,
-            // FNM-managed node, user-installed CLIs, etc.). Prepend workspace bin/
-            // inside the shell so it takes precedence over everything the profile adds.
-            // Use $(pwd)/bin instead of the Node.js binDir path to avoid Windows drive
-            // letter colons (C:\...) being interpreted as PATH separators.
+            // Prepend workspace bin/ so it takes precedence over system paths.
+            // Use $(pwd)/bin instead of the Node.js binDir path to avoid Windows
+            // drive letter colons (C:\...) being interpreted as PATH separators.
             const wrappedCommand = `export PATH="$(pwd)/bin:\$PATH" && ${command}`;
+            const args = useLoginShell
+                ? ['--login', '-c', wrappedCommand]
+                : ['-c', wrappedCommand];
 
-            const child = spawn(bashPath, ['--login', '-c', wrappedCommand], {
+            const child = spawn(bashPath, args, {
                 cwd: workspacePath,
                 env: childEnv,
             });
@@ -134,8 +142,19 @@ export class LocalProvider implements EnvironmentProvider {
             child.stdout.on('data', (data) => { stdout += data.toString(); });
             child.stderr.on('data', (data) => { stderr += data.toString(); });
 
-            child.on('close', (code) => {
-                resolve({ stdout, stderr, exitCode: code ?? 1 });
+            // Use 'exit' instead of 'close' — 'close' waits for ALL
+            // stdio pipe fds to close, which can hang when orphan
+            // processes inherit pipe fds.  With file redirect (> file
+            // 2>&1), orphans inherit the file fd instead, so 'close'
+            // would work.  But 'exit' is strictly safer since it fires
+            // as soon as the bash process exits regardless of fd state.
+            child.on('exit', (code) => {
+                setTimeout(() => {
+                    child.stdout.destroy();
+                    child.stderr.destroy();
+                    child.stdin.destroy();
+                    resolve({ stdout, stderr, exitCode: code ?? 1 });
+                }, 500);
             });
 
             child.on('error', () => {

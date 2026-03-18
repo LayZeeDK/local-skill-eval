@@ -1,0 +1,31 @@
+{
+  "name": "flash-attn",
+  "timestamp": "2026-03-11T06:39:31.838Z",
+  "modelfile": null,
+  "trials": [
+    {
+      "trial": 1,
+      "duration_s": 279.2,
+      "reward": 0.97,
+      "commands": 5
+    },
+    {
+      "trial": 2,
+      "duration_s": 231.9,
+      "reward": 1,
+      "commands": 4
+    },
+    {
+      "trial": 3,
+      "duration_s": 294,
+      "reward": 0.97,
+      "commands": 5
+    }
+  ],
+  "avg_duration_s": 268.4,
+  "std_dev_s": 32.4,
+  "avg_reward": 0.98,
+  "avg_commands": 4.7,
+  "target_met": true,
+  "reward_met": true
+}

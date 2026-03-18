@@ -1,0 +1,31 @@
+{
+  "name": "best-final",
+  "timestamp": "2026-03-11T07:53:34.356Z",
+  "modelfile": null,
+  "trials": [
+    {
+      "trial": 1,
+      "duration_s": 300,
+      "reward": 1,
+      "commands": 6
+    },
+    {
+      "trial": 2,
+      "duration_s": 294.1,
+      "reward": 0.97,
+      "commands": 5
+    },
+    {
+      "trial": 3,
+      "duration_s": 328.1,
+      "reward": 0.97,
+      "commands": 6
+    }
+  ],
+  "avg_duration_s": 307.4,
+  "std_dev_s": 18.2,
+  "avg_reward": 0.98,
+  "avg_commands": 5.7,
+  "target_met": false,
+  "reward_met": true
+}

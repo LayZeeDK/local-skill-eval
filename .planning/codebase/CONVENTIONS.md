@@ -1,157 +1,159 @@
 # Coding Conventions
 
-**Analysis Date:** 2026-03-08
+**Analysis Date:** 2026-03-10
 
 ## Naming Patterns
 
 **Files:**
-- PascalCase for classes: `LocalProvider.ts`, `ClaudeAgent.ts`, `DeterministicGrader.ts`
-- camelCase for utility/functional modules: `cli.ts`, `evalRunner.ts`, `analyze.ts`
-- Directory names are lowercase: `src/agents/`, `src/providers/`, `src/graders/`, `src/reporters/`, `src/analytics/`
+- `camelCase.ts` for modules with a single primary export (e.g., `evalRunner.ts`, `cli.ts`)
+- `kebab-case` not used; multi-word files are camelCase
+- Test files: `<module>.test.ts` or `<module>-<concern>.test.ts` (e.g., `analytics.test.ts`, `docker-cache.test.ts`)
+- Benchmark/utility scripts: `<purpose>-<noun>.ts` (e.g., `benchmark-grader.ts`)
+
+**Classes:**
+- PascalCase (e.g., `EvalRunner`, `LocalProvider`, `DockerProvider`, `LLMGrader`, `DeterministicGrader`, `ClaudeAgent`, `GeminiAgent`, `AnalyticsEngine`)
 
 **Functions:**
-- camelCase for all functions: `loadTaskConfig()`, `runEval()`, `parseEnvFile()`, `withTimeout()`, `estimateTokens()`
-- Prefix utility functions with descriptive verbs: `calculate*()`, `load*()`, `run*()`, `parse*()`
+- camelCase (e.g., `loadTaskConfig`, `computeContextHash`, `calculateNormalizedGain`, `calculatePassAtK`, `runCliPreview`, `resolveGitBash`)
 
-**Variables:**
-- camelCase for local variables and constants: `taskPath`, `skillsPaths`, `numTrials`, `sessionLog`, `graderResults`
-- Constants defined as `const` with meaningful names: `baseName`, `discoveryDirs`, `envPairs`
-- Abbreviations used sparingly: `ms` for milliseconds, `tokens` for token counts, `cmd`/`cmds` for commands
+**Variables and Parameters:**
+- camelCase (e.g., `taskPath`, `skillsPaths`, `numTrials`, `logDir`, `ollamaHost`)
+- Unused parameters prefixed with `_` (e.g., `_workspacePath`, `_taskPath`, `_sessionLog`)
 
-**Types & Interfaces:**
-- PascalCase for interfaces: `TaskConfig`, `EvalReport`, `TrialResult`, `CommandResult`, `GraderConfig`, `EnvironmentProvider`, `BaseAgent`
-- Suffix interfaces with their category: `*Config`, `*Result`, `*Provider`, `*Agent`, `*Entry` (for log entries)
-- Type parameter names are single uppercase letters: `T` for generic types
+**Interfaces:**
+- PascalCase (e.g., `CommandResult`, `TaskConfig`, `GraderResult`, `EvalReport`, `EnvironmentProvider`, `AggregateStats`)
+- Exported from `src/types.ts` for shared domain types; module-local interfaces defined inline
+
+**Constants:**
+- `SCREAMING_SNAKE_CASE` for module-level constants (e.g., `PORT`, `DEFAULT_MODELS`, `GRADING_JSON_SCHEMA`, `GENERATE_TIMEOUT_MS`, `OLLAMA_NUM_CTX`)
+
+**Type Aliases / Union Types:**
+- Defined inline in interfaces where possible (e.g., `type: 'agent_start' | 'command' | 'agent_result'`)
 
 ## Code Style
 
 **Formatting:**
-- No linter or formatter configured (no `.eslintrc`, `.prettierrc`, or `biome.json`)
-- Code is hand-formatted with consistent indentation (4 spaces, inferred from source)
-- Line length varies but generally follows reasonable column width
-- Consistent use of blank lines around control flow
+- No Prettier or ESLint config present at project root
+- Indentation: 4 spaces (consistent across all source files)
+- Single quotes for string literals in TypeScript source
+- Trailing commas in multiline object/array literals (common but not universal)
+- Semicolons: present consistently
 
-**Imports:**
-- Node.js built-in imports first (prefixed with `*` namespace): `import * as fs from 'fs-extra'`, `import * as path from 'path'`
-- Third-party imports follow: `import Docker from 'dockerode'`, `import * as toml from 'toml'`
-- Local imports last with relative paths: `import { BaseAgent } from '../types'`
-- Each import category separated by a blank line
+**TypeScript strictness:**
+- `"strict": true` in `tsconfig.json` — all strict checks enabled
+- `target: "ES2024"`, `module: "CommonJS"`, `moduleResolution: "node"`
+- `skipLibCheck: true`
 
-**Access Modifiers:**
-- Classes use `private` for internal fields: `private provider: EnvironmentProvider`, `private logDir?: string`
-- Private methods are marked: `private timestamp()`, `private sanitize()`, `private callGemini()`
-- Public methods default (no modifier): `async setup()`, `async cleanup()`, `async runCommand()`
-- Abstract class methods: `abstract class BaseAgent { abstract run(...) }`
+**Line length:**
+- No enforced max, but long lines avoided; chained methods typically broken across lines
 
-## Comments
+**Brace style:**
+- K&R style: opening brace on same line as statement
+- Braces present on all control flow bodies (no braceless one-liners)
 
-**JSDoc/TSDoc:**
-- Block comments for methods and exported functions: `/** Description of what this does */`
-- Single-line explanatory comments in code: `// Strip surrounding quotes`, `// Check for Docker...`
-- Comments above key sections: `// ─── ANSI helpers`, `// ─── Main`, `// Build image from Dockerfile`
+## Import Organization
 
-**When to Comment:**
-- Explain the "why" for non-obvious logic: token estimation heuristic, pass@k calculation, secret sanitization
-- Describe algorithm purpose: `// Calculate pass@k: probability of at least 1 success in k trials`
-- Document input/output expectations for complex transformations
-- Minimal comments for self-documenting code (clear variable names and method names are preferred)
+**Order (observed pattern):**
+1. Node.js built-ins (`import * as fs`, `import * as path`, `import * as http`, `import * as os`, `import { createHash }`)
+2. Third-party packages (`import Docker from 'dockerode'`, `import * as toml from 'toml'`, `import * as tar from 'tar-stream'`)
+3. Local project imports (`import { BaseAgent, CommandResult } from '../types'`, `import { EvalRunner } from './evalRunner'`)
 
-**Examples from codebase:**
-- `src/evalRunner.ts` line 40: Documents pass@k calculation formula
-- `src/evalRunner.ts` line 63: Explains token estimation heuristic
-- `src/graders/index.ts` line 16: Documents what DeterministicGrader does
-- `src/providers/docker.ts` line 17: Explains the prepare/setup lifecycle
+**Import Style:**
+- Namespace imports (`import * as fs from 'fs-extra'`) for large modules
+- Named imports for specific symbols (`import { createHash } from 'node:crypto'`)
+- Default imports for packages that export a default (`import Docker from 'dockerode'`)
+- No barrel/index files; direct file imports only
+
+**Path Aliases:**
+- None configured — all imports use relative paths (`../types`, `./providers/docker`)
 
 ## Error Handling
 
 **Patterns:**
-- Errors thrown as `new Error()` with descriptive messages: `throw new Error('Docker build failed: ...')`
-- Errors caught with typed `catch (err: any)` and logged to console: `catch (err: any) { ... console.log(...) }`
-- Graceful fallbacks for external services (e.g., LLM graders): if Gemini API fails, try Anthropic; if both fail, return score 0 with error details
-- Promises reject explicitly: `(resolve, reject) => { ... reject(e) }`
+- `try/catch` blocks for async operations; errors logged with `console.error` or `console.warn` before returning null or a fallback value
+- Functions that can fail gracefully return `null` or a structured error object rather than throwing (e.g., `callOllama` returns `null` on connection error)
+- Timeout wrapping via `withTimeout()` helper in `src/evalRunner.ts` for agent execution
+- `process.exit(1)` on unrecoverable errors in CLI and test scripts
+- Empty catch blocks only in cleanup paths where errors are expected and safe to ignore: `catch { }` or `catch (e) { // Already removed }`
+- `catch` with typed error variable: `catch (err: any)` — accessing `err?.message` safely
 
-**Console Output:**
-- Use `console.log()` for standard output and progress reporting
-- Use `console.error()` for errors and warnings
-- CLI outputs use emoji for visual feedback: `✅`, `❌`, `🔍`, `🚀` (though some output marked with emoji may need updating for Windows compatibility)
+**Error messages:**
+- Include context: `\`${label} timed out after ${timeoutMs / 1000}s\``
+- Actionable messages for user-facing errors: `"Ollama is not running at ${ollamaHost}. Start it with: ollama serve"`
 
-**Async Error Context:**
-- Errors in async functions caught and provide context: try/catch blocks in `runSingleTrial()` capture workspace diagnostics before cleanup
-- Timeout errors include the timeout duration: `${label} timed out after ${timeoutMs / 1000}s`
+## Logging
+
+**Framework:** `console` (no logging library)
+
+**Patterns:**
+- `console.log` for informational progress output
+- `console.warn` for non-fatal issues (e.g., Ollama unavailable, warmup failed, suboptimal config)
+- `console.error` for failures
+- Structured prefixes in grader/LLM code: `[LLMGrader]`, `[INFO]`, `[OK]`, `[ERROR]`, `[WARN]`, `[SKIP]`
+- `process.stdout.write` for inline status (without newline): `process.stdout.write('  Trial 1/3 ')`
+
+## Comments
+
+**When to Comment:**
+- JSDoc `/** ... */` blocks on exported functions and classes that explain non-obvious behavior (e.g., `calculatePassAtK`, `computeContextHash`, `resolveGitBash`)
+- Inline `//` comments for algorithm steps, magic numbers, and non-obvious logic
+- File-level JSDoc blocks at top of test files to describe scope and link to related patterns
+
+**JSDoc/TSDoc style:**
+- Not consistently using `@param`/`@returns` tags; prefers prose description over tagged annotations
+- Example from `src/evalRunner.ts`:
+```typescript
+/**
+ * Calculate pass@k: probability of at least 1 success in k trials
+ * Using unbiased estimator: 1 - C(n-c, k) / C(n, k)
+ * where n = total trials, c = successes, k = attempts
+ */
+function calculatePassAtK(n: number, c: number, k: number): number {
+```
+
+**Section dividers in long files:**
+- Used in `tests/benchmark-grader.ts` to organize sections:
+```typescript
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+```
+- Used in `src/reporters/cli.ts`:
+```typescript
+// ─── ANSI helpers ──────────────────────────────────────────
+```
 
 ## Function Design
 
-**Size & Scope:**
-- Most functions 20–60 lines; some utility functions <10 lines
-- Class methods broken into smaller private helpers: `runTrialsParallel()` calls `runSingleTrial()`, `LLMGrader.grade()` delegates to `callGemini()`, `callAnthropic()`, `parseResponse()`
-- Long functions use internal helper functions: `sanitize()` has an internal `redact()` closure
+**Size:**
+- Most functions are 10–40 lines; longer functions (e.g., `runSingleTrial`, `benchmarkSingleRun`) kept cohesive with inline comments as section markers
 
 **Parameters:**
-- Explicit parameter names over destructuring when possible: `runEval(agent, taskPath, skillsPaths, numTrials, env, parallel)`
-- Record types for flexible configs: `env?: Record<string, string>`, `config: GraderConfig`
-- Optional parameters marked with `?`: `_workspacePath?: string`, `logDir?: string`
-- Unused parameters prefixed with underscore: `_taskPath`, `_workspace`, `_provider`
+- Positional parameters, typically 2–5 in number
+- Optional parameters use `?` suffix or default values (e.g., `numTrials: number = 1`, `env?: Record<string, string>`)
+- Record types used for flexible key-value maps: `Record<string, string>` for env vars
 
 **Return Values:**
-- Explicit Promise types: `Promise<TaskConfig>`, `Promise<EvalReport>`, `Promise<CommandResult>`
-- Complex returns typed with interfaces: return `TrialResult`, `EvalReport`, `GraderResult`
-- Sync functions rarely return; mostly operate on side effects (logging, file I/O)
+- Async functions return `Promise<T>` with concrete types
+- Nullable returns typed as `T | null` (e.g., `Promise<GraderResult | null>`)
+- Void cleanup methods declared as `Promise<void>`
 
 ## Module Design
 
 **Exports:**
-- Classes exported as named exports: `export class EvalRunner`, `export class LocalProvider`
-- Utility functions exported as named exports: `export async function loadTaskConfig()`, `export function getGrader()`
-- Interfaces exported for consumer use: `export interface TaskConfig`, `export interface EnvironmentProvider`
-- Single default export only in `src/cli.ts` (which runs main immediately)
+- Named exports for all public types, classes, and functions
+- No default exports in source modules (only `import Docker from 'dockerode'` as third-party default)
+- Abstract base class `BaseAgent` in `src/types.ts` used as interface contract
 
-**Barrel Files:**
-- `src/graders/index.ts` re-exports both grader classes and the factory function `getGrader()`
-- No barrel files in `src/agents/` or `src/providers/` — each file imports directly
+**Class Patterns:**
+- Private fields with `private` keyword and camelCase (e.g., `private provider`, `private logDir`, `private warmedUp`)
+- Private methods with `private` keyword for implementation details; public methods for the interface
+- Module-level cached singletons using `let _cachedBashPath: string | null = null` pattern
 
-**Layering:**
-- `src/types.ts` defines all core interfaces (no implementation)
-- `src/providers/*` implement `EnvironmentProvider` interface
-- `src/agents/*` extend `BaseAgent` abstract class
-- `src/graders/index.ts` implements `Grader` interface
-- `src/evalRunner.ts` orchestrates: uses agents, providers, graders
-
-## Database & State
-
-**No persistent database.** State is ephemeral:
-- `TrialResult` and `EvalReport` constructed in memory and optionally persisted to JSON files
-- Workspace state lives in temporary directories (LocalProvider: `/tmp/skill-eval-*`, DockerProvider: container ephemeral layers)
-- Session logs captured as JSON arrays in memory, sanitized, then written once to disk
-
-**File I/O:**
-- `fs-extra` library used throughout for safe directory operations
-- `path.join()` used consistently for cross-platform paths
-- Configuration loaded from TOML files (`task.toml`) and JSON reports
-- Results written with `fs.writeJSON(filePath, report, { spaces: 2 })`
-
-## Type Safety
-
-**TypeScript Configuration:**
-- Target: ES2024
-- Strict mode enabled: `"strict": true`
-- `esModuleInterop` and `forceConsistentCasingInFileNames` both true
-- `skipLibCheck` true to avoid type-checking node_modules
-
-**Type Annotations:**
-- All function parameters typed: `taskPath: string`, `numTrials: number`, `env?: Record<string, string>`
-- Return types explicit on exported/public functions: `async function loadTaskConfig(...): Promise<TaskConfig>`
-- Internal helper functions sometimes omit return types when obvious
-- Generic types used rarely, only for promises: `Promise<T>`, `Record<string, string>`
-
-## Concurrency
-
-**Promise-based:**
-- Parallel trials use `Promise.all()`: `await Promise.all(workers)` in `runTrialsParallel()`
-- Worker pool pattern for concurrent trial execution
-- Timeouts wrapped in promises: `withTimeout<T>(promise, timeoutMs, label)`
-
-**No locks or queues** — trials are independent and share no mutable state beyond the task filesystem (cleaned per trial).
+**Type Assertions:**
+- `as any` used for untyped external API responses (Ollama, Gemini, Anthropic JSON)
+- Explicit type parameters on `createHash`, `new Promise<T>`, etc.
 
 ---
 
-*Convention analysis: 2026-03-08*
+*Convention analysis: 2026-03-10*

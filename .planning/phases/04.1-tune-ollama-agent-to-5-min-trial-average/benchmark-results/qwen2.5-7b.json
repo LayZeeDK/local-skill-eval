@@ -1,0 +1,31 @@
+{
+  "name": "qwen2.5-7b",
+  "timestamp": "2026-03-11T10:54:19.683Z",
+  "modelfile": "modelfiles/qwen2.5-skill-eval-agent.Modelfile",
+  "trials": [
+    {
+      "trial": 1,
+      "duration_s": 242.6,
+      "reward": 0,
+      "commands": 25
+    },
+    {
+      "trial": 2,
+      "duration_s": 241.2,
+      "reward": 0,
+      "commands": 25
+    },
+    {
+      "trial": 3,
+      "duration_s": 240.7,
+      "reward": 0,
+      "commands": 25
+    }
+  ],
+  "avg_duration_s": 241.5,
+  "std_dev_s": 1,
+  "avg_reward": 0,
+  "avg_commands": 25,
+  "target_met": true,
+  "reward_met": false
+}

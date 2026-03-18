@@ -1,384 +1,317 @@
-# Domain Pitfalls
+# Pitfalls Research
 
-**Domain:** Local LLM skill evaluation (replacing cloud graders, adding local agent CLI backends)
-**Researched:** 2026-03-08
+**Domain:** Adding opencode CLI + Ollama agent backend to existing skill-eval framework
+**Researched:** 2026-03-10
+**Confidence:** HIGH
 
 ## Critical Pitfalls
 
-Mistakes that cause rewrites, data loss, or fundamental architecture failures.
+### Pitfall 1: Ollama Default 4K Context Window Silently Breaks opencode Tool Calling
 
-### Pitfall 1: Ollama 64K Context Requirement vs 16 GB RAM Budget
+**What goes wrong:**
+Ollama defaults to a 4,096-token context window for all models, regardless of the model's advertised capacity. opencode's agentic workflow -- tool definitions, system prompt, conversation history, tool call results -- easily exceeds 4K tokens within the first few exchanges. When context is exhausted, the model loses track of available tools and either stops calling them (producing text-only output) or emits malformed tool calls that opencode cannot parse. The agent appears to "think about" what to do but never actually does it.
 
-**What goes wrong:** Coding agent CLIs (Claude Code, OpenCode) require at least 64K token context windows for reliable operation. But Ollama defaults to only 4,096 tokens regardless of the model's advertised capacity. Developers set `num_ctx: 65536` to satisfy the requirement, then an 8B Q4_K_M model consumes ~5 GB for weights + ~10 GB for KV cache (FP16) at 64K context = **~15 GB total** -- leaving virtually nothing for the OS, Docker, Node.js, and the agent CLI process itself.
+**Why it happens:**
+Ollama intentionally caps `num_ctx` at 4096 for memory safety. Models like qwen3:8b advertise 40K+ context, but Ollama ignores the model's native capacity unless explicitly overridden. opencode connects via the OpenAI-compatible `/v1` endpoint and does not set `num_ctx` in its requests -- it assumes the server provides adequate context. This silent mismatch is the single most common failure mode reported by opencode+Ollama users.
 
-**Why it happens:** Ollama's default 4K context is deliberately conservative. The jump from 4K to 64K context causes KV cache memory to grow ~16x. Developers read "at least 64K tokens recommended" in Ollama's docs and comply without calculating the actual memory cost. The KV cache grows linearly with context length.
-
-**Consequences:** System freezes, OOM kills terminating the Ollama process mid-evaluation, or the OS swapping so aggressively that inference drops to near-zero tokens per second. Evaluation trials fail or hang indefinitely. On 16 GB usable RAM this is a hard wall.
-
-**Warning signs:**
-- System becomes unresponsive shortly after model loads
-- Ollama process killed by OS without error in Ollama logs
-- Inference speed drops below 1 token/second (thrashing swap)
-- `ollama ps` shows memory usage exceeding 12 GB
-
-**Prevention:**
-1. Use KV cache quantization: set `OLLAMA_KV_CACHE_TYPE=q4_0` to reduce KV cache memory by ~75% (64K context with q4_0 KV cache uses ~2.5 GB instead of ~10 GB)
-2. Target a practical context window of 16K-32K tokens with q8_0 KV cache instead of 64K with FP16
-3. Use smaller models (3B-4B) if full 64K context is truly needed
-4. Monitor with `ollama ps` and system memory monitors during initial setup
-5. Set memory limits in `.wslconfig` for WSL2 and Docker to prevent runaway consumption
-
-**Detection:** Add a pre-flight memory check before starting evaluations: estimate model weight size + KV cache at configured context length, compare against available RAM, and warn or abort.
-
-**Phase relevance:** Must be addressed in the local LLM grader phase AND the agent CLI backend phase. Every component that touches Ollama needs a memory budget.
-
-**Confidence:** HIGH -- based on Ollama documentation, multiple community reports, and hardware math.
-
----
-
-### Pitfall 2: LLM-as-Judge Quality Collapse with Small Local Models
-
-**What goes wrong:** The existing `LLMGrader` uses Gemini 2.0 Flash or Claude Sonnet to score agent transcripts against rubrics. Replacing these with a local 7-8B model causes grading quality to degrade significantly: scores become inconsistent, the model fails to follow the JSON output schema, and rubric adherence drops. Cloud models achieve ~80-90% agreement with human evaluators; small local models drop to ~55-68% agreement.
-
-**Why it happens:** Grading (LLM-as-a-Judge) requires the model to read a complex rubric, understand a multi-section transcript (instruction + commands + agent output + prior grader results), reason about quality, and produce structured JSON output. This demands strong instruction-following, long-context comprehension, and reliable structured output -- exactly where small models are weakest. The existing grading prompt is designed for frontier cloud models that have extensive RLHF alignment.
-
-**Consequences:** Grade inflation or deflation, random score variation between identical trials, JSON parsing failures that default to score 0, and loss of trust in evaluation results. The entire value proposition of skill-eval collapses if grades are unreliable.
+**How to avoid:**
+1. Create a custom Ollama model variant with expanded context: `ollama run qwen3:8b` then `/set parameter num_ctx 16384` then `/save qwen3:8b-16k`. Use the new model name in opencode config.
+2. Alternatively, set `OLLAMA_CONTEXT_LENGTH=16384` as an environment variable before starting `ollama serve` to set the default for all models.
+3. For CI, set this in the `setup-ollama` composite action alongside the existing `OLLAMA_FLASH_ATTENTION` and `OLLAMA_KV_CACHE_TYPE` vars.
+4. Do NOT jump to 64K context -- on 16GB RAM with a Q4 8B model, 16K context with q8_0 KV cache uses ~6-7GB total (weights + KV), leaving room for OS, Node.js, Docker, and opencode itself. 32K is the ceiling; 64K will OOM on the CI runner.
+5. Always verify effective context with `ollama ps` after loading -- the "context" column shows actual allocated context, not the model's advertised max.
 
 **Warning signs:**
-- Grader returns score 0 frequently due to JSON parse failures
-- Same agent output gets wildly different scores across trials
-- Scores cluster at extremes (0.0 or 1.0) instead of showing nuance
-- `parseResponse()` falls through to the catch block regularly
+- Agent produces text output describing what it would do, but `n_commands: 0` in trial results
+- opencode logs show tool calls being emitted but no tool results returning
+- Agent loops repeating the same reasoning without progress (context too small for conversation history)
+- `ollama ps` shows a loaded model with context size 4096 when you expected more
 
-**Prevention:**
-1. Use Ollama's structured output feature (`format` parameter with JSON schema) to enforce the `{"score": number, "reasoning": string}` schema rather than relying on prompt-based JSON extraction
-2. Simplify the grading prompt for local models: shorter rubrics, explicit scoring criteria, fewer transcript sections
-3. Set temperature to 0 for deterministic grading
-4. Validate JSON responses with a schema (Zod) and retry on failure (up to 3 attempts)
-5. Calibrate local grader against cloud grader on a held-out set: run both on the same transcripts, compute agreement rate, and only deploy local grader when agreement exceeds 75%
-6. Consider a Panel of LLMs (PoLL) approach: run the same transcript through 2-3 different small models and average the scores
-
-**Detection:** Add a "grader validation" mode that runs both cloud and local graders on reference transcripts and reports the correlation coefficient.
-
-**Phase relevance:** Central to the local LLM grader phase. Must be solved before any other phase can trust local grading results.
-
-**Confidence:** HIGH -- based on LLM-as-a-Judge research (Sebastian Raschka, Arize AI, Eugene Yan), Ollama structured outputs documentation, and the existing `parseResponse()` fragility noted in CONCERNS.md.
+**Phase to address:**
+Phase 1 (opencode+Ollama configuration). This must be validated before any agent evaluation work begins. A pre-flight check should confirm effective context window size.
 
 ---
 
-### Pitfall 3: Ollama Streaming + Tool Calling Bug Breaks Agent CLI Agentic Loops
+### Pitfall 2: opencode `run` Hangs Indefinitely on Errors Instead of Exiting
 
-**What goes wrong:** Claude Code and OpenCode rely on Ollama's OpenAI-compatible API (`/v1/chat/completions`) for model communication. When streaming is enabled (the default for interactive CLI use), tool calls are silently dropped -- the model decides to call a tool, but the streaming response returns empty content with `finish_reason: "stop"`, losing the tool call entirely. This breaks the agentic loop that makes coding agents functional.
+**What goes wrong:**
+When `opencode run` encounters an API error (HTTP 429 rate limit, connection refused, model not found, or any unrecoverable error), it logs the error but never exits -- the process hangs indefinitely. In the skill-eval framework, the `BaseAgent.run()` method spawns opencode as a subprocess. If opencode hangs, the agent timeout fires, but the subprocess may not be properly killed, leaving zombie processes that hold Ollama connections and memory.
 
-**Why it happens:** Ollama's native API (`/api/chat`) fully supports streaming + tool calling since May 2025. But the OpenAI compatibility layer at `/v1/chat/completions` has a known bug (ollama/ollama#12557) where tool call chunks are not properly serialized during streaming. Claude Code connects through the Anthropic Messages API compatibility layer, which has similar issues -- the stable Ollama release (as of March 2026) has streaming tool call bugs that break Claude Code's agentic loop.
+This is a known bug: [GitHub issue #8203](https://github.com/anomalyco/opencode/issues/8203). When rate-limited, `timeout 30 opencode run "what is 1+1"` returns exit code 124 (timeout from the `timeout` wrapper), not a meaningful opencode exit code.
 
-**Consequences:** The agent CLI appears to work but silently loses tool invocations. Code edits, file reads, and shell commands that the model requests are never executed. The agent produces incomplete or no output. Evaluations score 0 across the board with no obvious error message.
+**Why it happens:**
+opencode's `run` command was designed primarily for interactive terminal use. The error handling path logs to stderr but does not call `process.exit()` for all error types. The non-interactive mode (`run` subcommand) was added later and inherits this behavior. There is an open feature request ([#10411](https://github.com/anomalyco/opencode/issues/10411)) to add proper non-TTY detection and exit-on-error behavior.
+
+**How to avoid:**
+1. Always wrap `opencode run` invocations with an external timeout. In the `OpenCodeAgent.run()` implementation, use Node.js `child_process.spawn` with a kill timer, not just the eval runner's `withTimeout()` (which waits for the promise but does not kill the child process).
+2. Use `opencode run --quiet` to suppress the spinner, which can interfere with stdout parsing in non-TTY environments.
+3. Monitor the child process's stdout/stderr for error patterns (e.g., "rate limit", "connection refused") and kill proactively rather than waiting for the full timeout.
+4. After killing an opencode process, verify the Ollama connection is clean -- a hung opencode may have left a streaming request open, preventing the model from accepting new requests.
+5. Set an explicit external timeout shorter than the task's `timeout_sec` to give the eval runner time to capture diagnostics.
 
 **Warning signs:**
-- Agent produces text output but never executes any commands
-- `n_commands: 0` in trial results despite the model clearly intending tool use
-- Agent "conversations" that describe what they would do but never actually do it
-- Works fine with cloud API but fails silently with local Ollama
+- CI jobs hitting the GitHub Actions 30-minute job timeout with no output
+- Trial duration equals exactly `timeout_sec` (meaning the external timeout fired, not a normal completion)
+- Zombie `opencode` processes visible in `ps aux` after evaluation completes
+- Ollama returning 503 (overloaded) on subsequent requests because a hung connection consumes the single parallel slot
 
-**Prevention:**
-1. Use `ollama launch claude` (v0.15+) which handles API compatibility configuration automatically
-2. If configuring manually, use Ollama pre-release (0.14.3-rc1+) or the latest stable where streaming tool call fixes have landed
-3. Test tool calling explicitly before running evaluations: send a prompt that requires a tool call and verify the tool call appears in the response
-4. As a fallback, configure the agent to use `stream: false` (disable streaming) when using Ollama -- this sacrifices interactive UX but guarantees tool calls work
-5. Monitor Ollama GitHub issues #12557, #9632, #10870 for resolution
-
-**Detection:** Add an integration test that sends a known tool-calling prompt to Ollama and verifies the response contains a tool call object, not just text content.
-
-**Phase relevance:** Blocks both the opencode and Claude Code agent CLI phases. Must be validated before starting agent integration work.
-
-**Confidence:** HIGH -- based on multiple GitHub issues (ollama/ollama#12557, #9632, #10870) and community reports from OpenClaw, gptel, and other integrations.
+**Phase to address:**
+Phase 1 (OpenCodeAgent implementation). The agent wrapper must have robust subprocess lifecycle management from day one. This is not something to "fix later."
 
 ---
 
-### Pitfall 4: Docker x86 Emulation on ARM64 Windows -- Silent Failures and Memory Doubling
+### Pitfall 3: RAM Pressure from Concurrent Agent Model + Grader Model on Same Ollama Instance
 
-**What goes wrong:** The existing skill-eval framework uses Docker containers for task isolation. Task Dockerfiles are typically built for amd64/x86_64. On Windows ARM64 with Docker Desktop, these containers run under QEMU emulation, which is slow, uses ~2x memory, and has known failure modes: filesystem change notifications (inotify) do not work, `sudo` cannot escalate privileges (nosuid), and containers can crash silently.
+**What goes wrong:**
+The evaluation pipeline runs sequentially: agent executes (using e.g., qwen3:8b for tool calling), then grader scores (using qwen2.5:3b for structured output). Both models are served by the same Ollama instance. Ollama's default `OLLAMA_MAX_LOADED_MODELS=3` means both models stay resident in RAM simultaneously. On the 16GB CI runner: qwen3:8b at Q4_K_M with 16K context = ~6GB, qwen2.5:3b at Q4 with 8K context = ~2.5GB, plus Ollama overhead, OS, Node.js, Docker = ~3-4GB. Total: ~12-13GB. This works, barely -- but if context windows are larger, or if a third process (Docker build) runs concurrently, the system pages to swap and inference drops to near-zero tokens/sec or the OOM killer fires.
 
-**Why it happens:** Docker Desktop on Windows ARM64 uses WSL2 with QEMU to emulate x86. QEMU emulation is "best effort" -- Docker's own documentation warns that Intel-based containers on ARM machines "can crash as QEMU sometimes fails to run the container." Most base images used for development (node, ubuntu, python) now offer multi-arch builds, but task-specific Dockerfiles may pull amd64-only dependencies.
+On the local dev machine (32GB), this is manageable but still a concern during Docker-based evaluations where WSL2 consumes memory.
 
-**Consequences:** Task environments crash unpredictably, evaluations fail with cryptic QEMU segfaults, memory usage doubles (emulation overhead + WSL2 overhead + Docker overhead), and the already-tight 16 GB RAM budget is blown. Docker Desktop itself may fail to start with "Unexpected WSL error" on some ARM64 configurations.
+**Why it happens:**
+Ollama defaults to keeping 3 models loaded for CPU inference. The framework runs agent and grader sequentially, but Ollama does not know they are sequential -- it keeps both loaded for fast switching. The grader model (qwen2.5:3b, already validated in v1.0) loads during grading and stays resident. The agent model loads during the next trial and both coexist. Memory pressure accumulates silently because Ollama does not log warnings before hitting system limits. The OOM killer terminates Ollama without any application-level error.
+
+**How to avoid:**
+1. Set `OLLAMA_MAX_LOADED_MODELS=1` to force Ollama to unload the previous model before loading the next. This adds ~5-10 seconds of model swap time per transition but prevents OOM.
+2. If both models must stay loaded, use `OLLAMA_KV_CACHE_TYPE=q8_0` (halves KV cache memory) and `OLLAMA_FLASH_ATTENTION=1` on both.
+3. Use `keep_alive: "0"` in the Ollama API request for the agent model call to unload it immediately after the agent finishes, freeing RAM for the grader.
+4. Use the same model for both agent and grader if possible -- then there is no model swap at all. But qwen2.5:3b (grader) is too small for agentic tool calling, and qwen3:8b (agent) was not benchmarked for grading, so this requires validation.
+5. Monitor with `ollama ps` between agent and grader phases to verify memory state.
+6. In CI (`setup-ollama`), set `OLLAMA_MAX_LOADED_MODELS=1` alongside the existing tuning variables.
 
 **Warning signs:**
-- Docker Desktop shows "Docker Engine stopped" repeatedly
-- Containers exit with signal 11 (SIGSEGV) or signal 4 (SIGILL)
-- `wsl --list` fails with "Class not registered"
-- Memory usage spikes to 90%+ when starting a single container
-- File watchers (nodemon, webpack) don't trigger inside containers
+- Ollama process killed by OS (check `dmesg | grep -i oom` on Linux CI runner)
+- Grading suddenly takes 10x longer (thrashing swap)
+- Second trial fails even though first succeeded (cumulative memory pressure)
+- `ollama ps` shows both models loaded with combined memory exceeding available RAM
 
-**Prevention:**
-1. Use the local provider (not Docker) as the primary execution environment for ARM64 Windows development
-2. If Docker is needed, ensure all base images are multi-arch (arm64 native) -- check with `docker inspect --format='{{.Architecture}}' <image>`
-3. Set memory limits in `.wslconfig`: `[wsl2]\nmemory=6GB` to prevent WSL2 from consuming all available RAM
-4. Reserve Docker-based execution for CI (GitHub Actions runs on x86_64) where it works natively
-5. Build task Dockerfiles with `--platform linux/arm64` when targeting local ARM64 development
-
-**Detection:** Add a platform check in the Docker provider that warns when running x86 images on ARM64 and suggests using the local provider.
-
-**Phase relevance:** Affects the CI/CD phase (Docker works fine on x86 runners) and all local development. The local provider fallback must be robust before Docker-dependent features are built.
-
-**Confidence:** HIGH -- based on Docker documentation (known issues page), GitHub issues (docker/for-win#14821), and the project's own constraint documentation.
-
-## Moderate Pitfalls
-
-### Pitfall 5: Ollama Model Unloading Causes Cold Start Latency Between Trials
-
-**What goes wrong:** Ollama unloads models from memory after 5 minutes of inactivity (default `OLLAMA_KEEP_ALIVE=5m`). In skill-eval, there can be long gaps between the grading call and the next trial's agent execution. Each cold reload of a 7B model takes 10-30 seconds on CPU, adding significant overhead to multi-trial evaluations.
-
-**Why it happens:** Ollama's default behavior is designed for interactive use where a user might leave and come back. In an automated evaluation pipeline, the framework may appear "idle" to Ollama during Docker setup, workspace preparation, or agent execution (which does not use the grading model).
-
-**Prevention:**
-1. Set `OLLAMA_KEEP_ALIVE=-1` (never unload) during evaluations, restore to `5m` afterward
-2. Alternatively, send a lightweight "ping" request to the model between trials to keep it warm
-3. Configure via environment variable in the evaluation runner script, not globally
-
-**Detection:** Log model load times; if any exceed 5 seconds, the model was likely cold-loaded.
-
-**Phase relevance:** Affects the local LLM grader phase. Should be configured as part of the evaluation runner setup.
-
-**Confidence:** HIGH -- documented in Ollama FAQ and multiple community sources.
+**Phase to address:**
+Phase 2 (integration of agent + grading pipeline). Must be tested end-to-end with memory monitoring before CI deployment.
 
 ---
 
-### Pitfall 6: Prompt Format Mismatch Between Cloud and Local Models
+### Pitfall 4: opencode Tool Calls Returned as Text Instead of Structured API Calls
 
-**What goes wrong:** The existing `LLMGrader` constructs a grading prompt designed for Gemini/Claude -- frontier models with strong instruction following that handle long, multi-section prompts with implicit formatting rules. Local models interpret prompts more literally and have different chat template expectations. The same prompt that produces reliable `{"score": 0.8, "reasoning": "..."}` from Claude produces `Here is my evaluation:\n\nScore: 0.8\nReasoning: The agent...` from a local model.
+**What goes wrong:**
+Small local models (7B-8B) frequently fail to produce proper structured tool calls via the OpenAI-compatible API. Instead of returning a response with `tool_calls` in the API response body, the model emits raw XML/JSON text describing the tool invocation: `<tool_call>{"name": "bash", "arguments": {"command": "ls"}}</tool_call>`. opencode receives this as plain assistant text, not as a tool invocation, so no tool is executed. The agent appears to be working (it is generating text) but accomplishes nothing.
 
-**Why it happens:** Ollama applies model-specific chat templates (Go templates) that transform prompts before sending to the model. Each model family (Llama, Qwen, Mistral, Phi) has different system prompt handling, different special tokens, and different tendencies for output formatting. Cloud LLM APIs handle this transparently; local models expose the complexity.
+This is reported in [opencode issue #7486](https://github.com/anomalyco/opencode/issues/7486) and affects LM Studio, Ollama, and other local backends.
 
-**Prevention:**
-1. Use Ollama's `format` parameter with JSON schema instead of prompt-based JSON instruction
-2. Rewrite the grading prompt for local models: be explicit about output format, include examples (few-shot), use shorter rubrics
-3. Test the grading prompt with the specific model being used before deploying -- prompts that work on Qwen may fail on Llama
-4. Use the `/api/chat` endpoint with explicit system/user message roles rather than a single concatenated prompt
+**Why it happens:**
+Tool calling requires the model to output tokens in a specific format that the inference server (Ollama) can parse into structured `tool_calls` objects. Ollama has a parser for this, but it depends on the model's chat template being correctly configured. If the model was fine-tuned with a different tool-calling format than what Ollama's template expects, Ollama's parser fails to detect the tool call and passes it through as plain text. Qwen models use Hermes-style tool calling; Llama uses a different format. Mismatched templates cause silent failures.
 
-**Detection:** Add structured output validation; if the JSON extraction regex fails more than 10% of the time, the prompt needs revision for that model.
-
-**Phase relevance:** Directly impacts the local LLM grader phase.
-
-**Confidence:** MEDIUM -- based on Ollama documentation on prompt templates, XDA article on local vs cloud prompting differences, and the project's existing fragile JSON parsing.
-
----
-
-### Pitfall 7: Agent CLI Environment Variable Conflicts
-
-**What goes wrong:** Claude Code requires `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, and `ANTHROPIC_API_KEY` to be set for Ollama. OpenCode requires its own `opencode.json` configuration. When running skill-eval, these variables must coexist with the existing `ANTHROPIC_API_KEY` used by the `LLMGrader` for cloud-based grading. Setting `ANTHROPIC_API_KEY=""` (required for Claude Code + Ollama) breaks the cloud LLM grader. Setting it to the real key makes Claude Code try to connect to Anthropic's cloud instead of Ollama.
-
-**Why it happens:** The same environment variable (`ANTHROPIC_API_KEY`) serves two conflicting purposes: authenticating with the real Anthropic API for grading, and being set to empty/dummy for Claude Code to use Ollama instead. The existing code (line 129 of `graders/index.ts`) reads `env?.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY` -- it will always find the key if it is set globally.
-
-**Consequences:** Either the grader fails (no API key) or the agent CLI connects to the wrong backend (cloud instead of local). Worse, if both are needed simultaneously (local agent + cloud grader for calibration), the conflict is irreconcilable with a single set of environment variables.
+**How to avoid:**
+1. Use only models from Ollama's official "tools" category: [ollama.com/search?c=tools](https://ollama.com/search?c=tools). These have verified chat templates.
+2. In opencode config, set `"tools": true` for the model explicitly: `"qwen3:8b-16k": { "name": "qwen3:8b-16k", "tools": true }`.
+3. Before running evaluations, send a test prompt that requires a tool call (e.g., "list files in the current directory") and verify the response contains actual `tool_calls`, not text describing a tool call.
+4. If tool calls appear as text, the model's Ollama template is wrong. Try a different model variant or update Ollama to a version that fixes the template.
+5. Prefer qwen3:8b or qwen3-coder for opencode -- these have the best-tested tool calling integration per the [ollama-x-opencode guide](https://github.com/p-lemonish/ollama-x-opencode).
 
 **Warning signs:**
-- Agent CLI hangs trying to connect to Anthropic cloud when it should use Ollama
-- Grader returns "No API key available for LLM grading" even though a key is set
-- Evaluations that worked with cloud agents fail when switching to local agents
+- opencode session shows the model "talking about" running commands but `n_commands: 0`
+- Agent output contains literal `<tool_call>` or `{"name": "bash"` text
+- Model produces long reasoning text followed by zero tool executions
+- Works correctly with cloud models (Anthropic, OpenAI) but fails with local models
 
-**Prevention:**
-1. Use separate, namespaced environment variables: `GRADER_ANTHROPIC_API_KEY` for the grader, let `ollama launch` handle agent CLI configuration
-2. Use `ollama launch claude` (v0.15+) which sets agent-specific env vars without polluting the global environment
-3. In the evaluation runner, set agent env vars only for the agent subprocess scope (child process env), not process-wide
-4. When both local agent and cloud grader are needed, pass the grader API key explicitly in the grader configuration, not through environment variables
-
-**Detection:** Add a startup check that detects conflicting environment variable configurations and warns the user.
-
-**Phase relevance:** Must be resolved when designing the local LLM grader and agent CLI integration. Architectural decision needed early.
-
-**Confidence:** HIGH -- directly observable from the existing source code (`src/graders/index.ts` lines 128-142, `src/agents/claude.ts`).
+**Phase to address:**
+Phase 1 (model selection and validation). Build a tool-calling smoke test that runs before every evaluation and fails fast if the model cannot properly invoke tools.
 
 ---
 
-### Pitfall 8: GitHub Actions CI Cannot Run Local LLM Inference
+### Pitfall 5: opencode Config Precedence Causes Silent Model/Permission Overrides
 
-**What goes wrong:** Developers expect to run the full evaluation pipeline (local agent + local grader) in GitHub Actions CI. Standard GitHub-hosted runners have 7 GB RAM, no GPU, and limited CPU -- nowhere near enough to load and run even a small 3B model. Model downloads (2-5 GB) add minutes to each CI run, and Docker Hub rate limits can block model image pulls.
+**What goes wrong:**
+opencode has a layered config system: Remote > Global (`~/.config/opencode/opencode.json`) > Custom (`OPENCODE_CONFIG_DIR`) > Project (`opencode.json` in project root). The project-level config has highest precedence. When running skill-eval, the eval framework needs specific opencode settings (Ollama backend, specific model, all permissions auto-approved). But if the developer has a global config pointing to a cloud provider, or the project has a stale `opencode.json` from a previous experiment, those settings silently override or merge with the intended config, causing the agent to use the wrong model, wrong backend, or require interactive permission approval (which hangs in CI).
 
-**Why it happens:** GitHub-hosted runners are designed for build/test workloads, not inference. There is no GPU passthrough, and RAM is shared with the runner OS and Docker daemon. The new (March 2026) per-minute platform fee for self-hosted runners ($0.002/min) adds cost to long-running evaluation jobs.
+**Why it happens:**
+Configs are merged, not replaced. A global config setting `"provider": {"anthropic": {...}}` does not get removed when a project config adds `"provider": {"ollama": {...}}` -- both providers exist, and model resolution may pick the wrong one. Permission settings from global config carry over unless explicitly overridden. In CI, the global config path (`~/.config/opencode/`) may contain cached state from a previous job.
 
-**Prevention:**
-1. Design CI to run deterministic graders only -- shell-based `test.sh` scripts that do not need LLM inference
-2. Use the existing cloud LLM grader (`GEMINI_API_KEY` / `ANTHROPIC_API_KEY` as secrets) for CI LLM grading
-3. Keep local LLM evaluation as a developer-only workflow, not a CI requirement
-4. If CI-based LLM evaluation is needed later, use self-hosted runners with adequate hardware or Ollama Cloud
-5. Cache model files between CI runs using GitHub Actions cache (saves download time but not inference cost)
-
-**Detection:** CI job fails with OOM or hangs indefinitely during model loading -- add a timeout and clear error message.
-
-**Phase relevance:** Must be addressed in the CI/CD phase. The CI architecture should separate deterministic validation (CI-friendly) from LLM evaluation (local-only).
-
-**Confidence:** HIGH -- based on GitHub-hosted runner specs, Ollama memory requirements, and multiple CI/Ollama integration guides.
-
----
-
-### Pitfall 9: Ollama on Windows ARM64 -- CPU-Only, No NPU/GPU Acceleration
-
-**What goes wrong:** Developers on Snapdragon X Elite expect the NPU (45 TOPS) or Adreno GPU to accelerate inference. Ollama uses only CPU on ARM64 Windows. All 45 TOPS of NPU compute sit idle. Inference speed for a 7B Q4 model is roughly 5-10 tokens/second on CPU, compared to 40-120 tokens/second with GPU acceleration on x86 systems.
-
-**Why it happens:** Ollama's backend (llama.cpp/ggml) supports CUDA and Metal for GPU acceleration but has no DirectML, Vulkan, or Qualcomm QNN backend for ARM64 Windows. The Snapdragon NPU is designed for ONNX INT4/INT8 models via Qualcomm AI Engine Direct, not GGUF models. There is no common model format that works for both Ollama (GGUF) and the NPU (ONNX QDQ).
-
-**Consequences:** Evaluation speed is 10-20x slower than comparable x86+GPU setups. A single trial with an 8B model grader + 8B model agent could take 30-60 minutes instead of 2-5 minutes. Running 10 trials becomes a multi-hour affair.
+**How to avoid:**
+1. In CI, explicitly set `OPENCODE_CONFIG_DIR` to a known clean directory within the workspace (e.g., `.opencode/ci-config/`).
+2. In the project's `opencode.json`, explicitly set ALL required fields -- do not rely on inheriting global defaults. Include model, provider, permissions, and disable autoupdate.
+3. For permissions in CI, set `"permission": { "*": "allow" }` to auto-approve all tools. For local dev, use the same or set `"bash": "allow", "edit": "allow"`.
+4. Add a pre-eval step that runs `opencode models --verbose` and verifies the resolved model matches expectations.
+5. In the `OpenCodeAgent` implementation, pass `--model ollama/qwen3:8b-16k` explicitly on the command line to override any config-level model defaults.
 
 **Warning signs:**
-- `ollama ps` shows 0% GPU utilization
-- Token generation speed consistently below 10 tok/s
-- Evaluation wall clock time seems unreasonably long
+- Agent connects to Anthropic/OpenAI cloud instead of local Ollama (unexpected network requests)
+- opencode prompts for permission approval and hangs (non-interactive mode but permissions not set to "allow")
+- Different behavior between local dev and CI despite "same" configuration
+- `opencode models` shows unexpected providers or models
 
-**Prevention:**
-1. Accept CPU-only performance and optimize for throughput: use smaller models (3-4B), shorter context windows, and simplified prompts
-2. For the grading task specifically, consider ONNX Runtime with QNN ExecutionProvider as an alternative inference path that CAN use the NPU (requires model conversion to ONNX QDQ format)
-3. Set realistic expectations: plan for 5-10 tok/s on CPU, budget 3-5 minutes per grading call, set agent timeouts accordingly
-4. Consider Ollama Cloud as a hybrid: run the agent locally but grade in the cloud for speed during development
-
-**Detection:** Log tokens-per-second during inference; compare against expected baseline.
-
-**Phase relevance:** Affects all phases that involve local LLM inference. Must be factored into timeout configurations and developer workflow expectations.
-
-**Confidence:** HIGH -- based on Ollama GitHub issue #5360, Qualcomm developer blog, and firsthand reports of Snapdragon X Elite inference performance.
-
-## Minor Pitfalls
-
-### Pitfall 10: Ollama Context Window Silent Truncation
-
-**What goes wrong:** Even when `num_ctx` is configured, if the input prompt exceeds the context window, Ollama silently truncates older parts of the conversation. The grading prompt (rubric + full transcript) can easily exceed 8K-16K tokens for complex tasks, causing the model to lose critical context (like the rubric itself) and produce meaningless scores.
-
-**Prevention:**
-1. Estimate prompt token count before sending to Ollama (use the existing `estimateTokens()` function from `evalRunner.ts`)
-2. If the prompt exceeds 80% of the configured context window, truncate the transcript (not the rubric) with a clear marker: "[...transcript truncated...]"
-3. Log a warning when truncation occurs
-
-**Phase relevance:** Local LLM grader phase.
-
-**Confidence:** HIGH -- documented Ollama behavior.
+**Phase to address:**
+Phase 1 (opencode configuration). Create a deterministic, version-controlled config that is used in both local dev and CI, with no reliance on global state.
 
 ---
 
-### Pitfall 11: Model Compatibility with Tool Calling
+### Pitfall 6: Ollama Streaming Tool Call Parsing Bugs Across Model Families
 
-**What goes wrong:** Not all Ollama models support tool calling (function calling). Using a model without tool support as an agent backend results in the model describing what it would do rather than actually invoking tools. OpenCode requires explicit `"tools": true` in its model configuration.
+**What goes wrong:**
+Ollama has had recurring bugs where tool calls emitted by certain model families are not parsed correctly during streaming. Qwen 3 and Qwen 3.5 tool calls emitted during "thinking" mode were not parsed (fixed in v0.17.3). Qwen 3.5 had additional parsing failures (fixed in v0.17.6-v0.17.7). These bugs cause tool calls to be silently dropped -- the model correctly decides to call a tool, Ollama's parser fails to detect the tool call in the stream, and the response arrives as plain text with `finish_reason: "stop"` instead of `finish_reason: "tool_calls"`.
 
-**Prevention:**
-1. Maintain a tested model compatibility matrix: which models support tool calling, which work with Claude Code, which work with OpenCode
-2. Add a model capability check at startup: query `ollama show <model>` and verify tool support before proceeding
-3. Start with known-good models: qwen3-coder, glm-4.7-flash for tool calling; use dedicated judge models for grading
+**Why it happens:**
+Ollama's tool call parser must handle diverse model output formats: some models output tool calls inline with thinking tokens, some use XML-style tags, some use JSON. Each model family's chat template affects how tool calls appear in the raw output. Ollama's parser is continuously evolving to handle new model families, and regressions are common when new models are added.
 
-**Phase relevance:** Agent CLI backend phases (opencode first, Claude Code second).
+**How to avoid:**
+1. Pin Ollama version to a known-good release. As of March 2026, v0.17.7 fixes the known Qwen 3/3.5 parsing issues. Lock this in `setup-ollama/action.yml` (already parameterized as `ollama-version: '0.17.7'`).
+2. Before upgrading Ollama, run the tool-calling smoke test with the specific model to verify no regressions.
+3. If streaming tool calls fail, test with `stream: false` as a diagnostic. If non-streaming works but streaming does not, it is an Ollama parser bug -- file an issue and pin the working version.
+4. Monitor [Ollama releases](https://github.com/ollama/ollama/releases) for tool-calling fixes in release notes before upgrading.
+5. Consider using Ollama's native `/api/chat` endpoint instead of `/v1/chat/completions` if opencode supports it -- the native endpoint has more mature tool call handling.
 
-**Confidence:** MEDIUM -- based on Ollama documentation and OpenCode configuration guides.
+**Warning signs:**
+- Tool calls work with one model but not another on the same Ollama version
+- Agent works correctly after an Ollama downgrade
+- `finish_reason` is always "stop" even when the model clearly intended a tool call
+- Adding `/no_think` to the prompt (disabling thinking mode) fixes tool calling
 
----
+**Phase to address:**
+Phase 1 (Ollama version pinning and model selection). Revisit when upgrading Ollama for any phase.
 
-### Pitfall 12: ONNX Runtime QNN Binary Incompatibility on Snapdragon
+## Technical Debt Patterns
 
-**What goes wrong:** If pursuing NPU-accelerated inference via ONNX Runtime + QNN ExecutionProvider as an alternative to Ollama, developers encounter `QNN_COMMON_ERROR_INCOMPATIBLE_BINARIES` errors. The QNN SDK version must exactly match the ONNX Runtime build. Additionally, `cpuinfo` may not recognize newer Snapdragon chips (X1E78100), and the x64 package must be used for quantization while the ARM64 package is used for inference.
+Shortcuts that seem reasonable but create long-term problems.
 
-**Prevention:**
-1. Pin exact versions: match QNN SDK version to the ONNX Runtime QNN wheel version documented in the release notes
-2. Use x64 for model quantization/conversion, ARM64 for inference -- do not mix
-3. Consider Windows ML as a higher-level abstraction that handles EP selection and version management automatically
-4. This path is significantly more complex than Ollama CPU-only -- only pursue if NPU acceleration is a hard requirement
+| Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
+|----------|-------------------|----------------|-----------------|
+| Hardcoding Ollama model name in agent wrapper | Quick prototype | Every model change requires code change; cannot switch models via config | Never -- use `task.toml` or opencode config from day one |
+| Using same timeout for agent + grader | Simpler config | Agent tasks need 5-15 minutes; grading needs 30-120 seconds. Same timeout either kills agents prematurely or lets graders hang too long | Never -- separate timeout configs in `task.toml` (already has `agent.timeout_sec`; add `grader.timeout_sec`) |
+| Skipping tool-call smoke test in CI | Faster CI pipeline | First real evaluation failure is cryptic (silent tool call drops); hours of debugging | Only during initial prototype; add to CI before v2.0 ships |
+| `OLLAMA_MAX_LOADED_MODELS=3` (default) | No config needed | OOM on 16GB CI runner when agent model + grader model both resident | Never in CI -- always set to 1 |
+| Ignoring opencode stderr output | Simpler output parsing | Miss error messages, rate limit warnings, model loading failures | Never -- capture and log stderr alongside stdout |
+| Using `--format text` for opencode output | Human-readable logs | Cannot programmatically detect tool calls, errors, or session state | Only for manual debugging; use `--format json` for eval runner |
 
-**Phase relevance:** Out of scope for initial phases. Relevant only if CPU-only performance proves unacceptable and NPU acceleration is attempted later.
+## Integration Gotchas
 
-**Confidence:** MEDIUM -- based on ONNX Runtime GitHub issue #26163, Qualcomm AI Hub documentation, and Microsoft Windows ML announcement.
+Common mistakes when connecting opencode, Ollama, and the existing eval pipeline.
 
----
+| Integration | Common Mistake | Correct Approach |
+|-------------|----------------|------------------|
+| opencode + Ollama | Assuming model's advertised context is used | Create custom model variant with explicit `num_ctx` or set `OLLAMA_CONTEXT_LENGTH` env var |
+| opencode + eval runner | Passing instruction as CLI argument (shell escaping breaks on special chars) | Write instruction to a temp file, pass as `--file` flag: `opencode run --file /tmp/instruction.md` |
+| opencode + CI | Using `opencode` TUI command instead of `opencode run` | Always use `opencode run --quiet --format json` in CI; TUI hangs without TTY |
+| Ollama agent + Ollama grader | Both models loaded simultaneously on 16GB | Set `OLLAMA_MAX_LOADED_MODELS=1`; accept 5-10s model swap overhead |
+| opencode + Docker provider | opencode runs inside Docker container, cannot reach host Ollama | opencode must run on the host, with Ollama on the host. Docker is only for workspace isolation, not agent execution |
+| opencode JSON output + subprocess | Using `readline()` to parse streaming JSON | Use newline-delimited JSON parsing with explicit buffer handling; `readline()` can hang on partial writes ([issue #11891](https://github.com/anomalyco/opencode/issues/11891)) |
+| opencode permissions + CI | Relying on default "allow all" behavior | Explicitly set `"permission": { "*": "allow" }` in project opencode.json; default behavior may change between versions |
+| Ollama env vars + CI | Setting `OLLAMA_FLASH_ATTENTION` etc. after `ollama serve` starts | Must set env vars BEFORE starting `ollama serve`; existing `setup-ollama` action handles this correctly |
 
-### Pitfall 13: Sequential Resource Contention Between Ollama, Docker, and Agent CLI
+## Performance Traps
 
-**What goes wrong:** Even with sequential execution, running Ollama (grading model loaded in RAM) + Docker Desktop (WSL2 VM overhead) + Agent CLI (Node.js + potentially another Ollama model for the agent) simultaneously exceeds 16 GB. The system grinds to a halt from memory pressure even though only one "task" runs at a time.
+Patterns that work at small scale but fail under evaluation workloads.
 
-**Prevention:**
-1. Unload the grading model before running the agent, and vice versa (use `OLLAMA_KEEP_ALIVE=0` or explicit model unload API call)
-2. Use the same model for both grading and agent tasks if possible (stays loaded)
-3. Profile total system memory usage during a complete evaluation cycle and identify the peak
-4. Consider using the local provider instead of Docker to eliminate WSL2/Docker overhead (~2-4 GB savings)
-5. Set `OLLAMA_MAX_LOADED_MODELS=1` to prevent multiple models competing for RAM
+| Trap | Symptoms | Prevention | When It Breaks |
+|------|----------|------------|----------------|
+| opencode auto-update in CI | First CI run downloads new opencode binary, adding 30-60s latency; update changes behavior between runs | Disable with `OPENCODE_DISABLE_AUTOUPDATE=true` and pin version in CI setup | Every CI run after opencode releases an update |
+| Ollama model warm-up not performed for agent | First agent trial takes 15-30s extra for model load; subsequent trials are fast | Add warm-up call for agent model, similar to existing `LLMGrader.warmUp()` | First trial of every evaluation run |
+| opencode spawns subagents (tasks/multi-agent) | Subagents create additional Ollama requests, exceeding `OLLAMA_NUM_PARALLEL=1`; requests queue and timeout | Set `OLLAMA_NUM_PARALLEL=1` and ensure opencode does not use multi-agent patterns for evaluation tasks | When using opencode's Task tool or multi-agent Conductor pattern |
+| Not using `--quiet` flag in CI | Spinner animation writes ANSI escape codes to stdout, corrupting JSON output parsing | Always pass `--quiet` (or `-q`) when running in non-TTY environment | Any CI run or subprocess invocation |
+| Context compaction during long agent tasks | opencode compacts context mid-task, losing tool call history; model repeats earlier actions or contradicts itself | Use sufficient context window (16K+) and monitor for compaction events in JSON output | When agent task requires many tool calls (>20) |
 
-**Phase relevance:** Integration testing phase when agent + grader + Docker are all wired together.
+## Security Mistakes
 
-**Confidence:** HIGH -- based on hardware constraints (16 GB usable) and typical process memory footprints.
+Domain-specific security issues for local LLM agent evaluation.
 
----
+| Mistake | Risk | Prevention |
+|---------|------|------------|
+| opencode agent has unrestricted bash access in workspace | Agent could execute destructive commands (`rm -rf /`, install malware, exfiltrate data) outside workspace | Use Docker provider for untrusted tasks; for local provider, set opencode permissions to restrict bash to workspace directory |
+| Ollama API exposed on 0.0.0.0 without auth | Any process on the network can send inference requests; no authentication by default | Bind to `127.0.0.1` only (Ollama default); in CI, this is fine; verify `OLLAMA_HOST` does not expose externally |
+| API keys in opencode config committed to repo | opencode.json may contain `apiKey` fields for cloud providers during development | Add `opencode.json` to `.gitignore` if it contains secrets; use env vars for API keys, not config files |
+| Agent output logged with sensitive data | If agent reads files with secrets during evaluation, those appear in session logs uploaded as CI artifacts | Existing `sanitize()` method redacts env vars; extend to also redact patterns matching API key formats |
 
-### Pitfall 14: Model Download and First-Run Latency in Developer Workflow
+## UX Pitfalls
 
-**What goes wrong:** First-time setup requires pulling Ollama models (2-5 GB each), which takes 5-30 minutes depending on network speed. Developers expect `npm run eval` to "just work" and are frustrated when the first run hangs waiting for a model download. Additionally, model updates may change behavior silently.
+Common developer experience issues in this domain.
 
-**Prevention:**
-1. Add a `npm run setup:models` script that pulls required models and validates they work
-2. Document exact model names and versions (including quantization tags) in a `models.json` config file
-3. Pin model versions using Ollama's digest-based pulling to prevent silent updates
-4. Add a pre-eval check that verifies required models are available locally before starting
+| Pitfall | User Impact | Better Approach |
+|---------|-------------|-----------------|
+| No progress indicator during agent execution | Developer stares at blank terminal for 5-15 minutes wondering if it is stuck | Stream opencode JSON events and show live tool-call activity (e.g., "Running: bash ls", "Editing: src/main.ts") |
+| Cryptic "model not found" when Ollama model name mismatches | Developer pulls `qwen3:8b` but opencode config says `qwen3:8b-16k` (custom variant not created) | Add pre-flight model check: verify the exact model name in opencode config exists in `ollama list` output |
+| Silent fallback from local to cloud | If opencode cannot connect to Ollama, some configs may silently fall through to a cloud provider, incurring unexpected API costs | Verify Ollama connectivity before starting; if evaluating local-only, configure opencode with ONLY the Ollama provider (no cloud fallback) |
+| Model download on first CI run takes 5+ minutes | CI job appears stuck during `ollama pull`; no progress shown in GitHub Actions logs | Cache Ollama models between CI runs (existing `setup-ollama` action does this with `actions/cache`) |
+| Different results between local (ARM64) and CI (ARM64 Linux) | Subtle differences in FP arithmetic on different ARM64 implementations cause score variations | Use temperature=0, pin Ollama version, accept minor score variance as inherent to the platform |
 
-**Phase relevance:** Developer experience setup phase.
+## "Looks Done But Isn't" Checklist
 
-**Confidence:** MEDIUM -- common complaint in Ollama community.
+Things that appear complete but are missing critical pieces.
 
-## Phase-Specific Warnings
+- [ ] **opencode+Ollama connection:** Model loads and responds to text prompts -- but verify it actually executes tool calls (not just describes them). Send a prompt requiring `bash` tool use and check for actual command execution.
+- [ ] **CI pipeline runs:** Evaluation completes on CI -- but verify the agent model was actually loaded (not skipped due to memory). Check `ollama ps` output in CI logs and verify agent model appeared.
+- [ ] **Agent timeout works:** Trial hits timeout and reports failure -- but verify the opencode subprocess was actually killed. Check for zombie processes and orphaned Ollama connections.
+- [ ] **JSON output parsing:** `opencode run --format json` returns JSON events -- but verify `--command` flag is not also being used, which [breaks JSON output](https://github.com/anomalyco/opencode/issues/2923).
+- [ ] **Context window configured:** Custom model variant created with 16K context -- but verify `ollama ps` shows the custom variant loaded, not the base model with default 4K context.
+- [ ] **Permissions auto-approved in CI:** opencode does not prompt for permission -- but verify this is because permissions are set to "allow", not because the model never attempted a tool call.
+- [ ] **Model compatibility matrix:** Agent model tested and works with tool calling -- but test with the specific Ollama version pinned in CI, not just "latest". Ollama upgrades can regress tool calling.
+- [ ] **Memory budget validated:** Evaluation completes locally (32GB RAM) -- but test on a 16GB-constrained environment (Docker memory limit or CI runner) to validate CI viability.
 
-| Phase Topic | Likely Pitfall | Mitigation |
-|-------------|---------------|------------|
-| CI/CD setup | CI runners lack resources for LLM inference (Pitfall 8) | Separate deterministic CI tests from LLM evaluation; use cloud grader in CI |
-| Local LLM grader | Quality degradation vs cloud models (Pitfall 2) | Structured outputs, calibration against cloud baseline, simplified prompts |
-| Local LLM grader | Memory budget blown by context window (Pitfall 1) | KV cache quantization, practical context limits, memory pre-flight checks |
-| Local LLM grader | Prompt format mismatch (Pitfall 6) | Model-specific prompt templates, structured output enforcement |
-| Local LLM grader | Env var conflicts with agent config (Pitfall 7) | Namespaced env vars, subprocess-scoped configuration |
-| OpenCode agent | Ollama streaming + tool call bug (Pitfall 3) | Use latest Ollama, test tool calling explicitly, disable streaming as fallback |
-| OpenCode agent | Model lacks tool support (Pitfall 11) | Compatibility matrix, capability checks at startup |
-| OpenCode agent | 64K context vs RAM budget (Pitfall 1) | KV cache quantization, smaller models, practical context limits |
-| Claude Code agent | Streaming tool call regression (Pitfall 3) | Use `ollama launch claude`, pre-release Ollama builds, integration test |
-| Claude Code agent | Env var conflicts (Pitfall 7) | `ollama launch` handles this; manual config needs careful scoping |
-| Docker isolation | QEMU emulation failures on ARM64 (Pitfall 4) | Prefer local provider; use ARM64-native images; reserve Docker for CI |
-| Integration testing | Memory contention between components (Pitfall 13) | Single model for both roles, explicit model unloading, profile peak memory |
-| NPU acceleration (future) | ONNX binary incompatibility (Pitfall 12) | Pin SDK versions, use Windows ML abstraction, defer until needed |
+## Recovery Strategies
+
+When pitfalls occur despite prevention, how to recover.
+
+| Pitfall | Recovery Cost | Recovery Steps |
+|---------|---------------|----------------|
+| Context window too small (silent tool call failure) | LOW | Create new model variant with larger `num_ctx`; re-run evaluation. No code changes needed. |
+| opencode hangs in CI | LOW | Kill the process, add external timeout wrapper, re-run. May need to restart Ollama if connection is stuck. |
+| OOM from concurrent models | MEDIUM | Set `OLLAMA_MAX_LOADED_MODELS=1`, restart Ollama, re-run. May need to restart the entire CI job if OOM killed Node.js too. |
+| Tool calls emitted as text | MEDIUM | Switch to a known-good model from Ollama's tools category. May require updating opencode config and re-validating. |
+| opencode config precedence confusion | LOW | Delete all non-project configs (`~/.config/opencode/`), create a single clean project-level `opencode.json`, re-run. |
+| Ollama version regresses tool calling | MEDIUM | Pin Ollama to previous working version in `setup-ollama/action.yml`. File upstream bug report. Potential delay if no working version exists for the desired model. |
+| Agent + grader env var conflict | MEDIUM | Refactor to use separate env var namespaces. Requires code changes to `LLMGrader` to read from `GRADER_ANTHROPIC_API_KEY` etc. |
+| Subagent/task timeout (opencode multi-agent) | HIGH | Redesign the opencode task to avoid multi-agent patterns. Use single-agent with explicit tool calls instead. May require rewriting AGENTS.md instructions. |
+
+## Pitfall-to-Phase Mapping
+
+How roadmap phases should address these pitfalls.
+
+| Pitfall | Prevention Phase | Verification |
+|---------|------------------|--------------|
+| Ollama 4K default context (Pitfall 1) | Phase 1: opencode+Ollama config | `ollama ps` shows 16K+ context for loaded model; tool-calling smoke test passes |
+| opencode `run` hangs on errors (Pitfall 2) | Phase 1: OpenCodeAgent implementation | Agent timeout test: force an error (wrong model name), verify subprocess exits within 30s with non-zero exit code |
+| RAM pressure: agent + grader models (Pitfall 3) | Phase 2: end-to-end integration | Monitor peak memory during full eval cycle on 16GB-constrained environment; no OOM or swap thrashing |
+| Tool calls as text (Pitfall 4) | Phase 1: model selection | Automated smoke test: send tool-requiring prompt, assert `tool_calls` field present in API response |
+| Config precedence overrides (Pitfall 5) | Phase 1: opencode project config | CI step that runs `opencode models` and asserts only Ollama provider is configured |
+| Ollama streaming parser bugs (Pitfall 6) | Phase 1: Ollama version pinning | Tool-calling smoke test with pinned Ollama version; test before any version upgrade |
+| Auto-update in CI | Phase 2: CI workflow | Set `OPENCODE_DISABLE_AUTOUPDATE=true`; verify opencode version in CI logs matches pinned version |
+| Subprocess lifecycle (hangs, zombies) | Phase 1: OpenCodeAgent implementation | Stress test: run 5 consecutive trials with artificial failures injected; verify no zombie processes remain |
+| Memory budget in CI (16GB) | Phase 2: CI integration | CI step runs `free -m` before and after evaluation; peak usage documented and under 14GB |
+| opencode permissions in CI | Phase 1: opencode project config | CI step attempts a tool call that requires permission; succeeds without interactive prompt |
 
 ## Sources
 
-### Ollama Documentation and Issues
-- [Ollama FAQ](https://docs.ollama.com/faq) -- default context, keep-alive, memory settings
-- [Ollama Structured Outputs](https://docs.ollama.com/capabilities/structured-outputs) -- JSON schema enforcement
-- [Ollama Claude Code Integration](https://docs.ollama.com/integrations/claude-code) -- env vars, model requirements
-- [Ollama Launch Blog](https://ollama.com/blog/launch) -- zero-config agent CLI setup
-- [Ollama OpenCode Integration](https://docs.ollama.com/integrations/opencode) -- configuration, context window
-- [ollama/ollama#5360](https://github.com/ollama/ollama/issues/5360) -- Snapdragon NPU/GPU support request
-- [ollama/ollama#12557](https://github.com/ollama/ollama/issues/12557) -- Streaming + tool calling broken on OpenAI compat
-- [ollama/ollama#9632](https://github.com/ollama/ollama/issues/9632) -- Tool calling streaming not working
-- [ollama/ollama#10870](https://github.com/ollama/ollama/issues/10870) -- Full streaming tool call lifecycle request
-- [ollama/ollama#10114](https://github.com/ollama/ollama/issues/10114) -- Memory leak under load
-- [ollama/ollama#7266](https://github.com/ollama/ollama/issues/7266) -- ARM64 model loading failure
+### opencode CLI
+- [opencode CLI Documentation](https://opencode.ai/docs/cli/) -- `run` command, flags, non-interactive mode
+- [opencode Config Documentation](https://opencode.ai/docs/config/) -- layered config system, precedence rules
+- [opencode Permissions Documentation](https://opencode.ai/docs/permissions/) -- permission model, auto-approval in non-interactive mode
+- [opencode GitHub: Run hangs on API errors (#8203)](https://github.com/anomalyco/opencode/issues/8203) -- confirmed bug, process never exits
+- [opencode GitHub: Non-interactive mode request (#10411)](https://github.com/anomalyco/opencode/issues/10411) -- non-TTY detection gap
+- [opencode GitHub: Tool calls not executed (#7486)](https://github.com/anomalyco/opencode/issues/7486) -- local LLM tool call text emission
+- [opencode GitHub: JSON output with --command breaks (#2923)](https://github.com/anomalyco/opencode/issues/2923) -- format flag interaction bug
+- [opencode GitHub: Subprocess hang with Popen (#11891)](https://github.com/anomalyco/opencode/issues/11891) -- readline hang on streaming JSON
+- [opencode GitHub: Subagent stuck with no timeout (#11865)](https://github.com/anomalyco/opencode/issues/11865) -- multi-agent timeout gap
+- [ollama-x-opencode Setup Guide](https://github.com/p-lemonish/ollama-x-opencode) -- step-by-step context window fix, tool calling config
 
-### ARM64 and Snapdragon
-- [Qualcomm: Ollama on Windows on Snapdragon](https://www.qualcomm.com/developer/project/ollama-with-windows-on-snapdragon-wos) -- official partnership, CPU-only
-- [Running Local LLMs on Snapdragon X Elite](https://vcfvct.wordpress.com/2025/12/31/running-local-llms-on-a-snapdragon-x-elite-surface-laptop-7-my-journey-to-real-npu-acceleration/) -- firsthand experience, NPU vs CPU
-- [Qualcomm: Ollama Simplifies Inference on Snapdragon X](https://www.qualcomm.com/developer/blog/2024/10/ollama-simplifies-inference-open-sources-models-snapdragon-x-series-devices)
+### Ollama
+- [Ollama FAQ](https://docs.ollama.com/faq) -- default context, keep-alive, concurrent models, memory management
+- [Ollama Tool Calling Documentation](https://docs.ollama.com/capabilities/tool-calling) -- supported models, streaming tool calls
+- [Ollama OpenCode Integration](https://docs.ollama.com/integrations/opencode) -- official config example
+- [Ollama GitHub Releases](https://github.com/ollama/ollama/releases) -- Qwen 3/3.5 tool call parsing fixes in v0.17.3-v0.17.7
+- [Ollama: How Parallel Requests Work](https://www.glukhov.org/llm-performance/ollama/how-ollama-handles-parallel-requests/) -- memory scaling with concurrency
+- [Ollama: Debugging OOM with Multiple Models](https://vipinpg.com/blog/debugging-out-of-memory-crashes-when-running-multiple-gguf-models-simultaneously-in-ollama-with-shared-vram-pools/) -- real-world memory debugging
+- [Ollama: Context Window Optimization for OpenCode](https://sebastianzehner.com/posts/ollama-context-window-optimization-opencode/) -- fixing 4K default
+- [Ollama: num_ctx Misunderstanding (#2714)](https://github.com/ollama/ollama/issues/2714) -- advertised vs actual context
+- [Ollama: keep_alive Issues (#5272)](https://github.com/ollama/ollama/issues/5272) -- model unloading not respecting config
+- [Ollama: Preventing Model Swapping](https://blog.gopenai.com/preventing-model-swapping-in-ollama-a-guide-to-persistent-loading-f81f1dfb858d) -- persistent loading guide
 
-### ONNX Runtime and NPU
-- [ONNX Runtime QNN ExecutionProvider](https://onnxruntime.ai/docs/execution-providers/QNN-ExecutionProvider.html) -- QNN backend setup
-- [onnxruntime#26163](https://github.com/microsoft/onnxruntime/issues/26163) -- Incompatible binary error on ARM64
-- [Windows ML Announcement](https://blogs.windows.com/windowsdeveloper/2025/05/19/introducing-windows-ml-the-future-of-machine-learning-development-on-windows/)
-
-### Docker on ARM64
-- [Docker Known Issues](https://docs.docker.com/desktop/troubleshoot-and-support/troubleshoot/known-issues/) -- QEMU emulation warnings
-- [docker/for-win#14821](https://github.com/docker/for-win/issues/14821) -- WSL error on Snapdragon
-
-### LLM-as-a-Judge Research
-- [Evaluating the Effectiveness of LLM-Evaluators](https://eugeneyan.com/writing/llm-evaluators/) -- agreement rates, biases
-- [Grading Scale Impact on LLM-as-a-Judge](https://arxiv.org/html/2601.03444v1) -- scale affects judge quality
-- [Local LLM-as-Judge with Prometheus](https://blog.mozilla.ai/local-llm-as-judge-evaluation-with-lm-buddy-prometheus-and-llamafile/) -- open-source judge models
-- [Replacing the Judge: Llama 405B vs GPT-4](https://sambanova.ai/blog/can-llama-405b-outperform-gpt4) -- open-weight judge accuracy
-
-### GitHub Actions and CI
-- [CI for AI: Running Ollama in GitHub Actions](https://collabnix.com/ci-for-ai-running-ollama-llms-in-github-actions-with-open-source-tools)
-- [Ollama in GitHub Actions (Actuated)](https://actuated.com/blog/ollama-in-github-actions) -- self-hosted runner approach
-- [GitHub Actions Pricing Changes 2026](https://github.com/resources/insights/2026-pricing-changes-for-github-actions)
+### Local LLM Tool Calling
+- [Ollama Tool Calling Models](https://ollama.com/search?c=tools) -- verified tool-capable models
+- [Laurent Kubaski: Ollama Tool Support](https://medium.com/@laurentkubaski/ollama-tool-support-aka-function-calling-23a1c0189bee) -- small model tool calling failures
+- [Best Ollama Models for Function Calling](https://collabnix.com/best-ollama-models-for-function-calling-tools-complete-guide-2025/) -- model compatibility matrix
+- [Qwen Function Calling Documentation](https://qwen.readthedocs.io/en/latest/framework/function_call.html) -- Hermes-style tool use for Qwen3
 
 ### Memory and Performance
-- [Ollama VRAM Requirements Guide](https://localllm.in/blog/ollama-vram-requirements-for-local-llms) -- model size vs memory
-- [Ollama Tuning Guide: RAM Management](https://github.com/jameschrisa/Ollama_Tuning_Guide/blob/main/docs/ram-management.md) -- KV cache, quantization
-- [Troubleshooting Ollama Performance](https://deepwiki.com/ollama/ollama/6.4-troubleshooting-and-performance)
+- [Ollama VRAM Requirements Guide 2026](https://localllm.in/blog/ollama-vram-requirements-for-local-llms) -- model size vs memory by quantization
+- [Context Kills VRAM: KV Cache Memory](https://medium.com/@lyx_62906/context-kills-vram-how-to-run-llms-on-consumer-gpus-a785e8035632) -- ~0.110 MiB/token KV cache growth
+- [Optimizing Ollama on Windows](https://medium.com/@kapildevkhatik2/optimizing-ollama-performance-on-windows-hardware-quantization-parallelism-more-fac04802288e) -- Windows-specific tuning
 
 ---
-
-*Pitfalls research: 2026-03-08*
+*Pitfalls research for: opencode + Ollama agent backend integration*
+*Researched: 2026-03-10*

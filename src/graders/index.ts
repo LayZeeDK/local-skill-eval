@@ -1,4 +1,4 @@
-import { GraderConfig, GraderResult, CommandResult, EnvironmentProvider } from '../types';
+import { GraderConfig, GraderResult, EnvironmentProvider } from '../types';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 
@@ -50,20 +50,27 @@ export class DeterministicGrader implements Grader {
     }
 }
 
+// Module-level state so LLMGrader instances are effectively stateless.
+// This lets evalRunner create fresh instances per trial (upstream behavior)
+// without redundant Ollama model loads that cause timeouts.
+const warmedModels = new Set<string>();
+let warnedAboutConfig = false;
+
 /**
  * Uses an LLM to evaluate the agent's session transcript against a rubric.
  * Tries Ollama first (local, no API key), then falls back to Gemini/Anthropic cloud providers.
  */
 export class LLMGrader implements Grader {
-    private warnedAboutConfig = false;
-    private warmedUp = false;
+    // Set by grade() before any provider call, consumed by parseResponse.
+    // Maps criterion text → rubric section header (lowercased).
+    private criteriaSections: Map<string, string> = new Map();
 
     private warnOllamaConfig(): void {
-        if (this.warnedAboutConfig) {
+        if (warnedAboutConfig) {
             return;
         }
 
-        this.warnedAboutConfig = true;
+        warnedAboutConfig = true;
 
         // Only warn in CI -- optimized env vars improved benchmarks on 4-vCPU CI
         // runners (12s -> 6.3s) but had no effect on local 12-core Snapdragon X Elite.
@@ -91,11 +98,12 @@ export class LLMGrader implements Grader {
     }
 
     private async warmUp(ollamaHost: string, model: string): Promise<void> {
-        if (this.warmedUp) {
+        if (warmedModels.has(model)) {
             return;
         }
 
-        this.warmedUp = true;
+        warmedModels.add(model);
+        const numCtx = 2048;
         const start = Date.now();
         console.log(`[LLMGrader] Warming up ${model}...`);
 
@@ -106,7 +114,7 @@ export class LLMGrader implements Grader {
                     model,
                     prompt: 'hi',
                     stream: false,
-                    options: { num_predict: 1 },
+                    options: { num_predict: 1, num_ctx: numCtx },
                 }),
                 signal: AbortSignal.timeout(120_000),
             });
@@ -138,6 +146,29 @@ export class LLMGrader implements Grader {
 
         const rubric = await fs.readFile(rubricPath, 'utf-8');
 
+        // Extract criteria from rubric, tracking which section header each belongs to.
+        // Section headers (e.g., "## Workflow Compliance (0-0.4)") drive dimension-aware
+        // scoring in parseResponse — this is how we classify criteria generically without
+        // keyword-matching on criterion text.
+        const criteriaLines: string[] = [];
+        const criteriaSections: Map<string, string> = new Map();
+        let currentSection = '';
+
+        for (const rawLine of rubric.split('\n')) {
+            const line = rawLine.trim();
+            const sectionMatch = line.match(/^#{1,3}\s+(.+)/);
+
+            if (sectionMatch) {
+                currentSection = sectionMatch[1].toLowerCase();
+            } else if (line.startsWith('- ')) {
+                const criterion = line.replace(/^- /, '');
+                criteriaLines.push(criterion);
+                criteriaSections.set(criterion, currentSection);
+            }
+        }
+
+        this.criteriaSections = criteriaSections;
+
         // Build a comprehensive transcript for the LLM
         const sections: string[] = [];
 
@@ -147,12 +178,23 @@ export class LLMGrader implements Grader {
             sections.push(`## Task Instruction\n${instructionEntry.instruction}`);
         }
 
-        // Include all commands and their output
-        const commandEntries = sessionLog.filter(e => e.type === 'command');
+        // Include agent commands, filtering out infrastructure setup.
+        // Setup commands (base64 config injection, git init, container detection,
+        // Docker opencode install, and the opencode/timeout wrapper invocation)
+        // bloat the transcript and confuse the grader — it extracts them as
+        // commands_found and exhausts num_predict before reaching criteria.
+        const setupPattern = /^(cat \/proc|echo '([A-Za-z0-9+/=]{20,})'|base64\b|git init|pwd$|test -f \/\.dockerenv|which |npm install|unset NODE_OPTIONS|timeout )/;
+        const commandEntries = sessionLog
+            .filter((e: any) => e.type === 'command' && !setupPattern.test(e.command));
+
         if (commandEntries.length > 0) {
-            const cmds = commandEntries.map(e =>
-                `$ ${e.command}\n${e.stdout || ''}${e.stderr ? '\nSTDERR: ' + e.stderr : ''}\n[exit code: ${e.exitCode ?? 'unknown'}]`
-            ).join('\n\n');
+            const cmds = commandEntries.map((e: any) => {
+                // Truncate long stdout/stderr (e.g., opencode run stderr with ANSI codes)
+                const stdout = (e.stdout || '').substring(0, 500);
+                const stderr = (e.stderr || '').substring(0, 500);
+
+                return `$ ${e.command}\n${stdout}${stderr ? '\nSTDERR: ' + stderr : ''}\n[exit code: ${e.exitCode ?? 'unknown'}]`;
+            }).join('\n\n');
             sections.push(`## Commands Executed\n${cmds}`);
         }
 
@@ -175,21 +217,27 @@ export class LLMGrader implements Grader {
 
         const transcript = sections.join('\n\n');
 
-        const prompt = `You are an evaluation judge. Score the following agent session on a scale from 0.0 to 1.0 based on the rubric below.
+        const numberedCriteria = criteriaLines
+            .map((c, i) => `${i + 1}. ${c}`)
+            .join('\n');
 
-IMPORTANT CONTEXT: The agent runs inside a CLI wrapper (e.g., Gemini CLI). The agent's tool calls (file edits, shell commands) appear as text in the "Agent Output" section. This is a real execution trace, not hallucination — the "Commands Executed" section shows the CLI invocation and its captured output. The "Prior Grader Results" section shows objective automated test results that verify the actual filesystem state after the agent ran.
+        const prompt = `You are an evaluation judge. Evaluate the agent session below.
 
-## Rubric
-${rubric}
+STEP 1 — EXTRACT EVIDENCE: List every shell command the agent actually ran (from "Commands Executed" section). Only include commands that appear verbatim. If none, return an empty array.
+
+STEP 2 — CHECK EACH CRITERION: For each numbered criterion below, answer true ONLY if the commands_found evidence directly supports it. Answer false otherwise.
+
+## Criteria to evaluate (answer ALL ${criteriaLines.length}):
+${numberedCriteria}
 
 ## Session Transcript
 ${transcript}
 
-Respond with ONLY a JSON object: {"score": <number>, "reasoning": "<brief explanation>"}`;
+Respond with ONLY a JSON object: {"commands_found": ["cmd1", ...], "criteria": [{"criterion": "<exact criterion text>", "met": true/false}, ...], "reasoning": "<brief explanation>"}`;
 
         // Provider fallback chain: Ollama (local) -> Gemini (cloud) -> Anthropic (cloud)
         const ollamaHost = env?.OLLAMA_HOST || process.env.OLLAMA_HOST || 'http://localhost:11434';
-        const model = config.model || 'qwen2.5:3b';
+        const model = config.model || 'qwen3:4b';
         const apiKey = env?.GEMINI_API_KEY || process.env.GEMINI_API_KEY;
         const anthropicKey = env?.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY;
 
@@ -285,14 +333,15 @@ Respond with ONLY a JSON object: {"score": <number>, "reasoning": "<brief explan
     }
 
     private async callOllama(prompt: string, ollamaHost: string, config: GraderConfig): Promise<GraderResult | null> {
-        // Benchmark-validated Ollama defaults (Phase 2.1, qwen2.5:3b benchmark results)
-        // qwen2.5:3b: perfect discrimination (positive=1.0, empty=0.0, wrong=0.0),
-        // ~4.6s median wall time, 100% JSON Schema validity across all profiles.
-        const OLLAMA_NUM_CTX = 8192;
-        const OLLAMA_NUM_PREDICT = 512;
-        const OLLAMA_TIMEOUT_MS = 120_000;
+        // qwen3:4b provides evidence-grounded checklist scoring (Phase 5.1 gap closure).
+        // qwen2.5:3b had good binary discrimination but hallucinated partial scores.
+        // num_ctx 4096 gives headroom for longer transcripts + evidence extraction.
+        // 300s timeout accommodates qwen3:4b on CPU (~5-10 tok/s with 4096 context).
+        const OLLAMA_NUM_CTX = 4096;
+        const OLLAMA_NUM_PREDICT = 1024;
+        const OLLAMA_TIMEOUT_MS = 300_000;
 
-        const model = config.model || 'qwen2.5:3b';
+        const model = config.model || 'qwen3:4b';
 
         try {
             const response = await fetch(`${ollamaHost}/api/generate`, {
@@ -302,13 +351,28 @@ Respond with ONLY a JSON object: {"score": <number>, "reasoning": "<brief explan
                     model,
                     prompt,
                     stream: false,
+                    think: false,
                     format: {
                         type: 'object',
                         properties: {
-                            score: { type: 'number', minimum: 0.0, maximum: 1.0 },
+                            commands_found: {
+                                type: 'array',
+                                items: { type: 'string' },
+                            },
+                            criteria: {
+                                type: 'array',
+                                items: {
+                                    type: 'object',
+                                    properties: {
+                                        criterion: { type: 'string' },
+                                        met: { type: 'boolean' },
+                                    },
+                                    required: ['criterion', 'met'],
+                                },
+                            },
                             reasoning: { type: 'string' },
                         },
-                        required: ['score', 'reasoning'],
+                        required: ['commands_found', 'criteria', 'reasoning'],
                     },
                     options: {
                         temperature: 0,
@@ -325,7 +389,8 @@ Respond with ONLY a JSON object: {"score": <number>, "reasoning": "<brief explan
             }
 
             const data = await response.json() as any;
-            const text = data?.response || '';
+            // qwen3 models may put structured output in thinking field instead of response
+            const text = data?.response || data?.thinking || '';
 
             return this.parseResponse(text, config);
         } catch (err: any) {
@@ -413,19 +478,170 @@ Respond with ONLY a JSON object: {"score": <number>, "reasoning": "<brief explan
         try {
             // Extract JSON from response (may have markdown wrapping)
             const jsonMatch = text.match(/\{[\s\S]*\}/);
+
             if (jsonMatch) {
                 const parsed = JSON.parse(jsonMatch[0]);
-                const score = Math.max(0, Math.min(1, parseFloat(parsed.score) || 0));
-                return {
-                    grader_type: 'llm_rubric',
-                    score,
-                    weight: config.weight,
-                    details: parsed.reasoning || 'No reasoning provided'
-                };
+
+                // Checklist scoring with dimension-aware weighting.
+                // Based on CheckEval (EMNLP 2025, arxiv:2403.18771) and RocketEval
+                // (ICLR 2025, arxiv:2503.05142) findings that binary checklist
+                // decomposition dramatically improves small-model judge reliability
+                // over holistic scoring.
+                if (Array.isArray(parsed.criteria) && parsed.criteria.length > 0) {
+                    // Classify criteria by rubric section header (set by grade()).
+                    // Falls back to keyword matching when section info is unavailable
+                    // (e.g., cloud providers calling parseResponse without grade()).
+                    const sectionOf = (criterion: string): string => {
+                        // Exact match first
+                        const exact = this.criteriaSections.get(criterion);
+
+                        if (exact) {
+                            return exact;
+                        }
+
+                        // Fuzzy match: LLM may paraphrase or truncate criterion text.
+                        // Find the rubric criterion whose first 40 chars best overlap.
+                        const needle = criterion.toLowerCase().substring(0, 40);
+
+                        for (const [rubricCriterion, section] of this.criteriaSections) {
+                            if (rubricCriterion.toLowerCase().substring(0, 40) === needle) {
+                                return section;
+                            }
+                        }
+
+                        return '';
+                    };
+
+                    const isWorkflow = (criterion: string) => {
+                        const section = sectionOf(criterion);
+
+                        if (section) {
+                            return /workflow|compliance|procedure|protocol|pipeline|process.*step|step.*process/i.test(section);
+                        }
+
+                        return /workflow|compliance|mandatory|procedure|protocol|pipeline/i.test(criterion);
+                    };
+
+                    const isEfficiency = (criterion: string) => {
+                        const section = sectionOf(criterion);
+
+                        if (section) {
+                            return /efficien|overhead|resource.*usage/i.test(section);
+                        }
+
+                        return /efficien|redundan|trial.and.error|reasonable.*command|unnecessary|extraneous|superfluous|wasteful|excess/i.test(criterion);
+                    };
+
+                    // Technique A (prerequisite gating): If < 50% of workflow criteria are met,
+                    // efficiency criteria are vacuously true — override to false.
+                    // Ref: Autorubric (NAACL 2025, arxiv:2603.00077) CANNOT_ASSESS strategy
+                    // with SKIP mode, simplified here to a binary gate.
+                    const workflowCriteria = parsed.criteria.filter((c: any) => isWorkflow(c.criterion));
+                    const workflowMet = workflowCriteria.filter((c: any) => c.met).length;
+                    const workflowScore = workflowCriteria.length > 0 ? workflowMet / workflowCriteria.length : 0;
+
+                    if (workflowScore < 0.5) {
+                        for (const c of parsed.criteria) {
+                            if (isEfficiency(c.criterion) && c.met) {
+                                c.met = false;
+                            }
+                        }
+                    }
+
+                    // Technique E (intra-section entailment): If a "summary" criterion
+                    // (mentions N-step workflow/process/procedure) is marked true but a
+                    // sibling criterion in the SAME rubric section is false, the summary
+                    // is logically inconsistent — override to false.
+                    // Ref: DeepEval DAG metric (conditional scoring via decision trees);
+                    // Autorubric (arxiv:2603.00077) CANNOT_ASSESS for dependent criteria;
+                    // Logical consistency survey (arxiv:2410.02205) transitivity dimension.
+                    const summaryPattern = /\b\d+-step\b|workflow|process|procedure|pipeline|protocol|sequence|lifecycle/i;
+
+                    for (const c of parsed.criteria) {
+                        if (!c.met || !summaryPattern.test(c.criterion)) {
+                            continue;
+                        }
+
+                        const section = sectionOf(c.criterion);
+
+                        if (!section) {
+                            continue;
+                        }
+
+                        const siblingFailed = parsed.criteria.some(
+                            (s: any) => s !== c
+                                && sectionOf(s.criterion) === section
+                                && !s.met
+                        );
+
+                        if (siblingFailed) {
+                            c.met = false;
+                        }
+                    }
+
+                    // Technique C (weighted scoring): Workflow criteria count 2x,
+                    // reflecting rubric dimension weights (Workflow 0-0.4 vs others 0-0.3).
+                    // Ref: RocketEval (ICLR 2025, arxiv:2503.05142) confidence-weighted
+                    // normalized scoring — adapted from continuous logprob weights to
+                    // discrete dimension weights since Ollama structured output doesn't
+                    // expose token logprobs.
+                    let weightedMet = 0;
+                    let weightedTotal = 0;
+
+                    for (const c of parsed.criteria) {
+                        const w = isWorkflow(c.criterion) ? 2.0 : 1.0;
+                        weightedTotal += w;
+
+                        if (c.met) {
+                            weightedMet += w;
+                        }
+                    }
+
+                    let score = Math.max(0, Math.min(1, weightedTotal > 0 ? weightedMet / weightedTotal : 0));
+
+                    // Technique D (score cap): If the primary workflow criterion is false,
+                    // cap score at 0.4 to prevent partial attempts from exceeding midpoint.
+                    // Ref: RocketEval (ICLR 2025, arxiv:2503.05142) gate-criterion concept
+                    // — their trained predictor learns gate weights; we use a hard cap since
+                    // we lack annotated training data for learned reweighting.
+                    const workflowSynonyms = /workflow|process|procedure|protocol|pipeline/i;
+                    const workflowFollowed = parsed.criteria.find(
+                        (c: any) => /mandatory|follow|required|prescribed|correct|proper/i.test(c.criterion)
+                            && workflowSynonyms.test(c.criterion)
+                    );
+
+                    if (workflowFollowed && !workflowFollowed.met) {
+                        score = Math.min(score, 0.4);
+                    }
+
+                    const checklist = parsed.criteria
+                        .map((c: any) => `${c.met ? '[OK]' : '[  ]'} ${c.criterion}`)
+                        .join('; ');
+
+                    return {
+                        grader_type: 'llm_rubric',
+                        score: Math.round(score * 1000) / 1000,
+                        weight: config.weight,
+                        details: `${parsed.reasoning || 'No reasoning'} | Checklist: ${checklist}`
+                    };
+                }
+
+                // Legacy format: direct score field
+                if (parsed.score !== undefined) {
+                    const score = Math.max(0, Math.min(1, parseFloat(parsed.score) || 0));
+
+                    return {
+                        grader_type: 'llm_rubric',
+                        score,
+                        weight: config.weight,
+                        details: parsed.reasoning || 'No reasoning provided'
+                    };
+                }
             }
         } catch (e) {
             // Fall through
         }
+
         return { grader_type: 'llm_rubric', score: 0, weight: config.weight, details: `Failed to parse LLM response: ${text}` };
     }
 }

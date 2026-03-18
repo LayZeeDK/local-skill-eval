@@ -135,12 +135,12 @@ export class OpenCodeAgent extends BaseAgent {
             // Environment setup for opencode invocation:
             // - Unset NODE_OPTIONS: V8-specific flags leak into Bun/JSC runtime.
             // - OPENCODE_DISABLE_CLAUDE_CODE_PROMPT: skip ~/.claude/CLAUDE.md loading.
-            // - OPENCODE_DISABLE_EXTERNAL_SKILLS: skip skill discovery.
             // - OPENCODE_DISABLE_PROJECT_CONFIG: skip repo .claude/settings loading.
+            // External skills (.agents/skills/, .claude/skills/) are left enabled
+            // so opencode discovers SKILL.md files injected by the eval provider.
             const envPrefix = [
                 'unset NODE_OPTIONS;',
                 'OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1',
-                'OPENCODE_DISABLE_EXTERNAL_SKILLS=1',
                 'OPENCODE_DISABLE_PROJECT_CONFIG=1',
             ].join(' ');
 

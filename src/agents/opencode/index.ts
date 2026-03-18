@@ -135,17 +135,7 @@ export class OpenCodeAgent extends BaseAgent {
             // OPENCODE_DISABLE_PROJECT_CONFIG: skip repo .claude/ config loading
             // to avoid polluting model context with project settings.
             // External skills (.agents/skills/) left enabled for SKILL.md discovery.
-            const isLinuxLocal = !inDocker && process.platform !== 'win32';
-            const opencodeCmd = `OPENCODE_DISABLE_PROJECT_CONFIG=1 ${opencodeBin} run "$(cat .prompt.md)"`;
-            let fullCmd: string;
-
-            if (isLinuxLocal) {
-                // timeout provides process-level kill so a stuck opencode
-                // doesn't block the CI job until the step timeout.
-                fullCmd = `timeout --kill-after=10 240 bash -c '${opencodeCmd}'`;
-            } else {
-                fullCmd = opencodeCmd;
-            }
+            const fullCmd = `OPENCODE_DISABLE_PROJECT_CONFIG=1 ${opencodeBin} run "$(cat .prompt.md)"`;
 
             console.log('[OpenCodeAgent] Running:', fullCmd.slice(0, 250));
             const result = await runCommand(fullCmd);

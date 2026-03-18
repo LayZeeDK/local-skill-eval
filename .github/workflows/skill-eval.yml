@@ -100,6 +100,11 @@ jobs:
           echo "L3 bytes=$(wc -c < /tmp/t3.log)"
           cat /tmp/t3.log
 
+          echo "--- Layer 3b: opencode --version via script with /dev/null stdin (approach 11) ---"
+          timeout 15 script -q -e --flush -c "$OPENCODE_BIN_PATH --version < /dev/null" /tmp/t3b.log || true
+          echo "L3b bytes=$(wc -c < /tmp/t3b.log)"
+          cat /tmp/t3b.log
+
           echo "--- Layer 4: opencode --version to pipe (inherited GHA stdin) ---"
           echo "NODE_OPTIONS=${NODE_OPTIONS:-<unset>}"
           timeout 15 $OPENCODE_BIN_PATH --version > /tmp/t4.log 2>&1 || true

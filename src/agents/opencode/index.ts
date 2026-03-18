@@ -134,34 +134,61 @@ export class OpenCodeAgent extends BaseAgent {
             // heap alongside Ollama's model (~2.5 GB).
             const envVars = 'OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1';
 
-            // All platforms: run opencode with stdin redirected to /dev/null.
-            // Bun.stdin.text() (run.ts:345) only hangs when stdin is a never-
-            // closing pipe — /dev/null gives immediate EOF and returns "".
-            // The script --flush PTY approach was unreliable: script's file
-            // capture lost data under SIGTERM and added timing complexity.
-            // Docker provider uses the same < /dev/null pattern (Tty:true
-            // exec makes stdout a TTY, but stdin isTTY check is what matters).
+            // Approach 11: PTY stdout + /dev/null stdin via script --flush.
             //
-            // Linux local: wrap with timeout for process-level kill; unset
-            // NODE_OPTIONS so V8 flags do not reach Bun/JavaScriptCore.
+            // On the GHA ARM64 runner, opencode (Bun/JavaScriptCore) produces
+            // zero bytes to pipe stdout — confirmed by smoke tests L4/L4b/L4c
+            // (0 bytes even with explicit < /dev/null). Docker works because
+            // docker exec Tty:true gives opencode a PTY stdout that Bun
+            // flushes synchronously.
+            //
+            // script --flush allocates a real PTY for stdout and captures
+            // output to a typescript file. We redirect opencode's stdin to
+            // /dev/null INSIDE the script -c command so Bun.stdin.text()
+            // gets immediate EOF (not a PTY, which triggers TUI mode).
+            //
+            // On Windows/macOS (local dev), script is not used — pipe stdout
+            // works fine there.  Docker provider already has Tty:true.
             const isLinuxLocal = !inDocker && process.platform !== 'win32';
-            // Inner command: shell interprets VAR=value prefix and expands $(cat ...)
-            // --print-logs sends opencode's internal log stream to stderr for CI diagnosis.
-            const innerCmd = `${envVars} ${opencodeBin} run --print-logs "$(cat .prompt.md)" < /dev/null`;
-            // Linux local: timeout exec's its COMMAND directly (no shell) so
-            // VAR=value prefix is not interpreted.  Wrap in bash -c so the
-            // env vars and shell redirects are handled by the inner shell.
-            const fullCmd = isLinuxLocal
-                ? `unset NODE_OPTIONS; timeout --kill-after=10 240 bash -c '${innerCmd}'`
-                : innerCmd;
+            const ocOutFile = '/tmp/.opencode-output.log';
+            // Inner command: shell interprets VAR=value prefix and < /dev/null redirect.
+            const opencodeRun = `${envVars} ${opencodeBin} run "$(cat .prompt.md)" < /dev/null`;
+            let fullCmd: string;
+
+            if (isLinuxLocal) {
+                // script --flush: PTY stdout captured to ocOutFile.
+                // -q suppresses headers on some distros (Ubuntu 24.04 still
+                // prints them — we strip them when reading the file).
+                // -e returns the child's exit code.
+                // The ; kill 0 ensures PTY process group is cleaned up after
+                // opencode exits, preventing orphaned Ollama workers from
+                // holding the PTY slave fd open (which makes script hang).
+                const scriptCmd = `script -q -e --flush -c '${opencodeRun}; kill 0 2>/dev/null' ${ocOutFile}`;
+                fullCmd = `unset NODE_OPTIONS; timeout --kill-after=10 240 ${scriptCmd}`;
+            } else {
+                fullCmd = opencodeRun;
+            }
 
             console.log('[OpenCodeAgent] Running:', fullCmd.slice(0, 250));
             const result = await runCommand(fullCmd);
 
             const exitCode = result.exitCode;
-            const output = result.stdout + (result.stderr ? '\n' + result.stderr : '');
             // exit 124 = timeout sent SIGTERM; exit 137 = SIGKILL (--kill-after).
             const killedByTimeout = exitCode === 124 || exitCode === 137;
+
+            let output: string;
+
+            if (isLinuxLocal) {
+                // Read from script's typescript file. Strip "Script started..."
+                // and "Script done..." header/footer lines that Ubuntu 24.04
+                // writes even with -q flag.
+                const fileResult = await runCommand(
+                    `sed '/^Script started/d; /^Script done/d' ${ocOutFile} 2>/dev/null || true`,
+                );
+                output = fileResult.stdout;
+            } else {
+                output = result.stdout + (result.stderr ? '\n' + result.stderr : '');
+            }
 
             console.log(
                 '[OpenCodeAgent] exit:', exitCode,

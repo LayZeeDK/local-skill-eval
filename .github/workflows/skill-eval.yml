@@ -87,17 +87,10 @@ jobs:
           echo "L1 bytes=$(wc -c < /tmp/t1.log)"
           cat /tmp/t1.log
 
-          echo "--- Layer 2: Bun writes to PTY ---"
-          BUN=$(dirname "$OPENCODE_BIN_PATH")/bun
-          echo "Bun binary: $BUN (exists: $(test -f "$BUN" && echo yes || echo no))"
-          if [ -f "$BUN" ]; then
-            script -q -e --flush -c "$BUN -e 'console.log(\"bun-pty-ok\")'" /tmp/t2.log
-            echo "L2 bytes=$(wc -c < /tmp/t2.log)"
-            cat /tmp/t2.log
-          else
-            echo "L2 SKIP: bun not found at $BUN"
-            command -v bun && bun --version || echo "bun not on PATH"
-          fi
+          echo "--- Layer 2: Node.js writes to PTY (baseline) ---"
+          script -q -e --flush -c "node -e 'process.stdout.write(\"node-pty-ok\\n\")'" /tmp/t2.log
+          echo "L2 bytes=$(wc -c < /tmp/t2.log)"
+          cat /tmp/t2.log
 
           echo "--- Layer 3: opencode --version to PTY ---"
           timeout 15 script -q -e --flush -c "$OPENCODE_BIN_PATH --version" /tmp/t3.log || true

@@ -5,7 +5,8 @@
       "npm": "@ai-sdk/openai-compatible",
       "name": "Ollama (local)",
       "options": {
-        "baseURL": "http://127.0.0.1:11434/v1"
+        "baseURL": "http://127.0.0.1:11434/v1",
+        "chunkTimeout": 300000
       },
       "models": {
         "qwen3-4b-skill-eval-opencode-agent": {

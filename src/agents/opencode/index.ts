@@ -116,15 +116,15 @@ export class OpenCodeAgent extends BaseAgent {
             //    recursion), so the launcher resolves the platform binary itself.
             const opencodeBin = ((!inDocker && process.env.OPENCODE_BIN_PATH) || 'opencode')
                 .replace(/\\/g, '/');
-            // Disable opencode features that inflate the prompt beyond num_ctx 4096:
-            // - CLAUDE_CODE_PROMPT: ~/.claude/CLAUDE.md system instructions
+            // Disable opencode features that inflate the prompt beyond num_ctx:
+            // - CLAUDE_CODE_PROMPT: ~/.claude/CLAUDE.md (not present on CI, but
+            //   would add ~2K tokens from the user's global config if present)
             // - EXTERNAL_SKILLS: .agents/skills/ SKILL.md injection (~5K tokens)
-            // - PROJECT_CONFIG: repo .claude/ settings, AGENTS.md instructions
-            // The task instruction already contains the required workflow steps.
+            // Project config (opencode.json, CLAUDE.md, AGENTS.md) is left enabled
+            // so opencode discovers the Ollama provider and model settings.
             const envFlags = [
                 'OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1',
                 'OPENCODE_DISABLE_EXTERNAL_SKILLS=1',
-                'OPENCODE_DISABLE_PROJECT_CONFIG=1',
             ].join(' ');
             const result = await runCommand(
                 `${envFlags} ${opencodeBin} run "$(cat .prompt.md)"`,

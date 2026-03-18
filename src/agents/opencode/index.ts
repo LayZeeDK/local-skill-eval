@@ -113,12 +113,13 @@ export class OpenCodeAgent extends BaseAgent {
             //    evalRunner's withTimeout is promise-level only — it rejects the
             //    JS promise but cannot kill the spawned child process, leaving
             //    orphaned opencode/Ollama processes that block CI job cleanup.
-            //    Use OPENCODE_CLI_PATH for local provider (CI setup-opencode sets it).
-            //    NOT OPENCODE_BIN_PATH — opencode's launcher script reads that env
-            //    var and spawnSync's it, causing infinite recursion when it points
-            //    at the launcher itself.
+            //    OPENCODE_BIN_PATH is read by opencode's launcher to skip platform
+            //    detection — on Windows ARM64 it points to the Bun .exe directly.
+            //    On CI, this env var is NOT set (it would cause infinite recursion
+            //    if pointed at the launcher), so we fall back to bare 'opencode'
+            //    which is on PATH after npm install -g.
             //    Inside Docker, opencode is installed in-container and on PATH.
-            const opencodeBinRaw = (!inDocker && process.env.OPENCODE_CLI_PATH) || 'opencode';
+            const opencodeBinRaw = (!inDocker && process.env.OPENCODE_BIN_PATH) || 'opencode';
             // Convert Windows backslashes to forward slashes — Git Bash
             // interprets backslashes as escape sequences in command strings.
             const opencodeBin = opencodeBinRaw.replace(/\\/g, '/');

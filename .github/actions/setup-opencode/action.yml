@@ -1,5 +1,5 @@
 name: 'Setup OpenCode'
-description: 'Install opencode CLI, export OPENCODE_CLI_PATH, disable auto-update, verify installation'
+description: 'Install opencode CLI, disable auto-update, verify installation'
 inputs:
   version:
     description: 'OpenCode version to install'
@@ -12,18 +12,14 @@ runs:
       shell: bash
       run: |
         npm install -g opencode-ai@${{ inputs.version }}
-        OPENCODE_PATH=$(command -v opencode)
-        if [ -x "$OPENCODE_PATH" ]; then
-          echo "[OK] opencode installed at $OPENCODE_PATH"
-        else
-          echo "[FAIL] opencode not found"
+        if ! command -v opencode &>/dev/null; then
+          echo "[FAIL] opencode not found on PATH"
           exit 1
         fi
-        # Use OPENCODE_CLI_PATH, NOT OPENCODE_BIN_PATH. The opencode launcher
-        # script (bin/opencode) reads OPENCODE_BIN_PATH and spawnSync's it —
-        # pointing it at the launcher itself creates an infinite recursion.
-        echo "OPENCODE_CLI_PATH=$OPENCODE_PATH" >> "$GITHUB_ENV"
-        echo "OPENCODE_DISABLE_AUTOUPDATE=true" >> "$GITHUB_ENV"
+        echo "[OK] opencode installed at $(command -v opencode)"
         echo "[INFO] Architecture: $(uname -m)"
-        # Try opencode --version with 10s timeout (may hang due to Bun runtime init)
+        # Do NOT export OPENCODE_BIN_PATH — opencode's launcher script
+        # reads it and spawnSync's the target, causing infinite recursion
+        # when it points at the launcher itself.
+        echo "OPENCODE_DISABLE_AUTOUPDATE=true" >> "$GITHUB_ENV"
         timeout 10 opencode --version || echo "[WARN] opencode --version timed out or failed (non-blocking)"
